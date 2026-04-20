@@ -1,80 +1,76 @@
 import streamlit as st
 import pandas as pd
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import pdfplumber
+import re
 import plotly.graph_objects as go
-from datetime import datetime
 
-# --- 구글 시트 연결 설정 (현우님 시트 ID 적용 완료) ---
-# 주소에서 핵심 ID인 '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'만 사용합니다.
+# --- 구글 시트 API 설정 ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
-SHEET_URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0'
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-st.set_page_config(page_title="현우 통합 보험 솔루션 v2.2", layout="wide")
+def get_gsheet():
+    creds = ServiceAccountCredentials.from_json_keyfile_name('key.json', scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key(SHEET_ID).sheet1
 
-# 데이터 불러오기 함수
-def load_data():
-    try:
-        # 구글 시트를 CSV 형태로 읽어옵니다.
-        df = pd.read_csv(SHEET_URL)
-        return df.fillna("")
-    except Exception as e:
-        st.error(f"⚠️ 구글 시트 연결 실패: {e}")
-        st.info("시트 오른쪽 상단 [공유] -> [링크가 있는 모든 사용자] -> [편집자]로 설정되어 있는지 확인해주세요.")
-        return pd.DataFrame()
+# PDF 분석 로직
+def analyze_insurance_pdf(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text()
+    
+    patterns = {
+        "암": r"(암진단비|일반암진단비)\s*([\d,]+)",
+        "뇌": r"(뇌혈관질환진단비|뇌혈관진단비)\s*([\d,]+)",
+        "심": r"(허혈성심장질환진단비|허혈성진단비)\s*([\d,]+)",
+        "수술": r"(질병수술비)\s*([\d,]+)"
+    }
+    res = {}
+    for k, p in patterns.items():
+        match = re.search(p, text)
+        res[k] = int(match.group(2).replace(',', '')) // 10000 if match else 0
+    return res
 
-st.title("🛡️ 배현우 설계사 클라우드 영업 시스템 v2.2")
+st.set_page_config(page_title="현우 클라우드 보험 v2.5", layout="wide")
+st.title("🚀 실시간 보장분석 자동 업데이트 시스템")
 
-# --- 탭 구성 ---
-tab_search, tab_manage = st.tabs(["🔍 고객 통합 검색", "⚙️ 시스템 관리"])
+tab1, tab2 = st.tabs(["🔍 고객 조회 및 분석", "📊 전체 현황"])
 
-with tab_search:
-    db = load_data()
-    if not db.empty:
-        search_name = st.text_input("🔎 검색할 고객 성함을 입력하세요", "")
+with tab1:
+    sheet = get_gsheet()
+    data = pd.DataFrame(sheet.get_all_records())
+    
+    search_name = st.selectbox("고객을 선택하세요", ["선택하세요"] + list(data['이름'].unique()))
+    
+    if search_name != "선택하세요":
+        user_idx = data.index[data['이름'] == search_name][0]
+        row = data.iloc[user_idx]
         
-        if search_name:
-            # 이름으로 검색 (대소문자 구분 없이)
-            user_data = db[db['이름'].astype(str).str.contains(search_name)]
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader(f"📄 {search_name}님 보장분석 업로드")
+            uploaded_pdf = st.file_uploader("보장분석 PDF 파일을 올려주세요", type="pdf")
             
-            if not user_data.empty:
-                for idx, row in user_data.iterrows():
-                    with st.expander(f"👤 {row['이름']} 상세 정보 보기", expanded=True):
-                        col1, col2 = st.columns([1, 1])
-                        
-                        with col1:
-                            st.markdown("### 📋 인적 사항 및 메모")
-                            st.write(f"**연락처:** {row['연락처']}")
-                            st.write(f"**주민번호:** {row['주민번호']}")
-                            st.write(f"**주소:** {row['주소']}")
-                            st.write(f"**직업:** {row['직업']}")
-                            st.info(f"**병력 및 특이사항:**\n\n{row['병력(특이사항)']}")
-                            st.write(f"**가족 대표:** {row['가족대표']}")
+            if uploaded_pdf:
+                analysis = analyze_insurance_pdf(uploaded_pdf)
+                st.write("🔍 **분석된 보장금액:**")
+                st.write(f"암: {analysis['암']}만 / 뇌: {analysis['뇌']}만 / 심: {analysis['심']}만 / 수술: {analysis['수술']}만")
+                
+                if st.button("✅ 분석 결과 구글 시트에 즉시 반영"):
+                    # 구글 시트의 해당 행을 찾아 업데이트 (A, B, C... 열 순서에 맞춰 수정 필요)
+                    # 예: 암(I열), 뇌(J열), 심(K열), 수술(L열) 기준
+                    sheet.update_cell(user_idx + 2, 9, analysis['암'])   # 9번째 열: 암
+                    sheet.update_cell(user_idx + 2, 10, analysis['뇌'])  # 10번째 열: 뇌
+                    sheet.update_cell(user_idx + 2, 11, analysis['심'])  # 11번째 열: 심
+                    sheet.update_cell(user_idx + 2, 12, analysis['수술']) # 12번째 열: 수술
+                    st.success("🎉 구글 시트 업데이트 완료! 어디서든 확인 가능합니다.")
+                    st.rerun()
 
-                        with col2:
-                            st.markdown("### 📊 보장 현황")
-                            # 보장 데이터 (구글 시트 숫자를 기반으로 그래프 생성)
-                            labels = ['암', '뇌', '심', '수술']
-                            try:
-                                # 시트의 데이터를 숫자로 변환
-                                vals = [float(row['암']), float(row['뇌']), float(row['심']), float(row['수술'])]
-                                targets = [5000, 2000, 2000, 100]
-                                pcts = [(v/t)*100 for v, t in zip(vals, targets)]
-                                
-                                fig = go.Figure(go.Scatterpolar(r=pcts, theta=labels, fill='toself', line_color='#E91E63'))
-                                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=350)
-                                st.plotly_chart(fig, use_container_width=True)
-                                
-                                st.write(f"✅ 현재 보장액: 암 {vals[0]}만 / 뇌 {vals[1]}만 / 심 {vals[2]}만 / 수술 {vals[3]}만")
-                            except:
-                                st.warning("보장 금액 데이터가 숫자가 아닙니다. 구글 시트를 확인해주세요.")
-            else:
-                st.warning(f"'{search_name}' 고객님을 찾을 수 없습니다.")
-    else:
-        st.info("구글 시트에 데이터를 입력하면 여기에 나타납니다.")
-
-with tab_manage:
-    st.subheader("🔗 데이터 동기화 안내")
-    st.write("본 프로그램은 구글 시트와 실시간으로 연동됩니다.")
-    st.markdown(f"[📂 내 구글 시트 바로가기 (클릭)](https://docs.google.com/spreadsheets/d/{SHEET_ID})")
-    st.write("---")
-    st.write("1. 구글 시트에 고객 정보를 입력하거나 수정하세요.")
-    st.write("2. 프로그램에서 이름을 검색하면 수정된 내용이 즉시 반영됩니다.")
+        with col2:
+            st.subheader("📊 현재 보장 그래프")
+            vals = [float(row['암']), float(row['뇌']), float(row['심']), float(row['수술'])]
+            fig = go.Figure(go.Scatterpolar(r=vals, theta=['암', '뇌', '심', '수술'], fill='toself'))
+            st.plotly_chart(fig, use_container_width=True)
