@@ -2,5 +2,6 @@ streamlit
 pandas
 gspread
 oauth2client
-plotly
 pdfplumber
+requests
+beautifulsoup4
