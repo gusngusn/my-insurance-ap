@@ -6,7 +6,7 @@ from datetime import datetime
 # --- 구글 시트 연동 설정 ---
 # 현우님의 구글 시트 주소에서 복사한 ID를 아래에 넣으세요
 SHEET_ID = '여기에_복사한_시트_ID를_넣으세요' 
-SHEET_URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv'
+SHEET_URL = f'https://docs.google.com/spreadsheets/d/{1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY/edit?gid=0#gid=0}/gviz/tq?tqx=out:csv'
 
 st.set_page_config(page_title="현우 통합 보험 솔루션 v2.1 (Cloud)", layout="wide")
 
