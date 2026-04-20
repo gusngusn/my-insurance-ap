@@ -21,32 +21,46 @@ def get_gsheet():
         st.error(f"⚠️ 시트 연결 실패: {e}")
         return None
 
-# --- [보험매일 실시간 뉴스 스크래핑 함수] ---
+# --- [보험 뉴스 스크래핑 함수 - 더 강력한 로직] ---
 def get_insurance_news():
+    results = []
     try:
-        # 요청하신 보험매일 '종합/정책' 섹션 URL
+        # 1차 시도: 보험매일 직접 스크래핑
         url = "https://www.insnews.co.kr/news/articleList.html?sc_section_code=S1N2&view_type=sm"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
         }
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.encoding = 'utf-8' # 한글 깨짐 방지
+        resp = requests.get(url, headers=headers, timeout=7)
+        resp.encoding = 'utf-8'
         soup = BeautifulSoup(resp.text, 'html.parser')
         
-        # 보험매일 기사 제목 및 링크 추출 (사이트 구조 반영)
-        news_list = soup.select(".list-titles a")
-        
-        results = []
+        # 기사 제목 추출 로직 강화
+        news_items = soup.select(".list-titles a")
+        if not news_items: # 구조가 다를 경우 대비
+            news_items = soup.find_all('a', href=re.compile("articleView"))
+
         base_url = "https://www.insnews.co.kr"
-        for item in news_list[:7]: # 최신 뉴스 7개
+        for item in news_items[:7]:
             title = item.get_text().strip()
             link = item.get('href')
-            if link.startswith('/'): # 상대 경로일 경우 절대 경로로 변환
-                link = base_url + link
-            results.append({"title": title, "link": link})
-        return results
+            if title and link:
+                full_link = base_url + link if link.startswith('/') else link
+                if title not in [r['title'] for r in results]: # 중복 제거
+                    results.append({"title": title, "link": full_link})
+        
+        # 2차 시도: 만약 위 사이트가 차단되었다면 구글 뉴스에서 보험매일 기사만 추출
+        if not results:
+            url = "https://news.google.com/rss/search?q=site:insnews.co.kr&hl=ko&gl=KR&ceid=KR:ko"
+            resp = requests.get(url, timeout=5)
+            soup = BeautifulSoup(resp.content, features="xml")
+            items = soup.findAll('item')
+            for item in items[:7]:
+                results.append({"title": item.title.text, "link": item.link.text})
+                
     except Exception as e:
-        return []
+        pass # 에러 발생 시 빈 리스트 반환
+    return results
 
 # --- [기본 환경 설정] ---
 EXPECTED_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
@@ -60,7 +74,7 @@ with st.sidebar:
         ["🏠 홈", "🔍 고객조회/수정", "✍️ 고객정보 신규등록", "📑 고객리스트", "🚘 자동차증권 업데이트", "📄 보장분석리스트 입력", "🏥 보험청구 양식", "💬 고객문자발송(안내)"]
     )
     st.markdown("---")
-    st.caption("배현우 FC 전용 시스템 v7.8")
+    st.caption("배현우 FC 전용 시스템 v7.9")
 
 # 데이터 로드
 sheet = get_gsheet()
@@ -75,13 +89,15 @@ if menu == "🏠 홈":
     col1, col2 = st.columns([2, 1])
     with col1:
         st.info(f"현재 등록된 총 고객은 **{len(db)}명**입니다.")
-        st.markdown("### 📰 보험매일 실시간 뉴스 (종합/정책)")
+        st.markdown("### 📰 보험매일 실시간 뉴스")
         news_list = get_insurance_news()
         if news_list:
             for n in news_list:
                 st.markdown(f"• [{n['title']}]({n['link']})")
         else:
-            st.warning("뉴스를 불러올 수 없습니다. 사이트 접근 권한이나 연결 상태를 확인하세요.")
+            st.warning("⚠️ 현재 보험 뉴스 사이트 연결이 원활하지 않습니다. 잠시 후 다시 확인해 주세요.")
+            if st.button("뉴스 다시 불러오기"):
+                st.rerun()
 
 elif menu == "🔍 고객조회/수정":
     st.subheader("🔍 고객 상세 조회")
@@ -97,6 +113,7 @@ elif menu == "🔍 고객조회/수정":
                     with c2:
                         if row['차량번호']:
                             st.success(f"**차량:** {row['차량번호']} ({row['보험사']})\n\n**📅 자동차 만기:** {row['자동차만기일']}")
+                        else: st.info("차량 정보 없음")
                     st.markdown("---")
                     memo = row['병력(특이사항)']
                     if "[보장분석]" in memo:
@@ -132,11 +149,12 @@ elif menu == "📑 고객리스트":
     st.table(db[['날짜', '이름', '연락처', '주소', '자동차만기일']].iloc[start_idx : start_idx + page_size])
     
     st.write("페이지 이동:")
-    cols = st.columns(20)
+    cols = st.columns(min(total_pages, 20))
     for i in range(1, total_pages + 1):
-        if cols[i-1].button(str(i), key=f"p_{i}"):
-            st.session_state.current_page = i
-            st.rerun()
+        if i <= len(cols):
+            if cols[i-1].button(str(i), key=f"p_{i}"):
+                st.session_state.current_page = i
+                st.rerun()
 
 elif menu == "🚘 자동차증권 업데이트":
     st.subheader("🚘 자동차 정보 업데이트")
