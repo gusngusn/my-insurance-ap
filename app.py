@@ -22,8 +22,8 @@ def get_gsheet():
 
 EXPECTED_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
 
-st.set_page_config(page_title="현우 통합 관리 v5.0", layout="wide")
-st.title("🛡️ 배현우 설계사 통합 관리 시스템 v5.0")
+st.set_page_config(page_title="현우 통합 관리 v5.1", layout="wide")
+st.title("🛡️ 배현우 설계사 통합 관리 시스템 v5.1")
 
 sheet = get_gsheet()
 
@@ -38,7 +38,7 @@ if sheet:
 
     tab1, tab2, tab3, tab4 = st.tabs(["🔍 고객 조회 및 계약리스트", "✍️ AI 정보 등록/업데이트", "🚘 자동차 증권 업데이트", "📄 보장분석 파일 업로드"])
 
-    # [TAB 1] 고객 조회 - 가독성 끝판왕 버전
+    # [TAB 1] 고객 조회 - 찌꺼기 데이터 차단 로직
     with tab1:
         search_name = st.text_input("🔎 검색할 고객 성함")
         if search_name:
@@ -47,29 +47,31 @@ if sheet:
             if not res.empty:
                 for idx, row in res.iterrows():
                     with st.expander(f"👤 {row['이름']} (주민번호: {row['주민번호']})", expanded=True):
-                        st.markdown("### 📋 현재 유지계약 리스트")
+                        st.markdown("### 📋 유지계약 리스트")
                         memo_raw = row.get('병력(특이사항)', '')
                         
                         if "[보장분석]" in memo_raw:
                             analysis_part = memo_raw.split("[보장분석]")[-1]
+                            # 데이터 파싱
                             ins_items = [item.strip() for item in analysis_part.split('|') if item.strip()]
                             
                             table_data = []
                             for item in ins_items:
-                                # 필터링: 미납/해지/실효 및 불완전한 행 제외
-                                if any(k in item for k in ["미납", "해지", "실효", "종료", "보험사", "계약자", "납입주기"]): continue
-                                
+                                # [강력 필터링] 미납, 해지, 실효, 의미 없는 단어, 짧은 텍스트는 모두 제외
+                                if any(k in item for k in ["미납", "해지", "실효", "종료", "보험사", "계약자", "납입주기", "상품명", "내용없음"]):
+                                    continue
+                                    
                                 parts = item.split('/')
                                 if len(parts) >= 2:
-                                    # 상품명 정제: 숫자 인덱스 제거 및 괄호 내용 삭제
-                                    name = parts[1].strip()
-                                    name = re.sub(r'^\d+\s*', '', name) 
-                                    name = re.sub(r'\(.*?\)|\[.*?\]', '', name).replace("무배당", "").strip()
+                                    # 상품명에서 숫자와 괄호 찌꺼기 제거
+                                    name = re.sub(r'^\d+\s*', '', parts[1]).strip()
+                                    name = re.sub(r'\(.*?\)|\[.*?\]', '', name).replace("무배당", "").replace("생명", "").strip()
                                     
                                     price = parts[2].strip() if len(parts) > 2 else "-"
                                     date = parts[3].strip() if len(parts) > 3 else "-"
                                     
-                                    if len(name) > 3 and name != "내용없음":
+                                    # 상품명이 제대로 된 것만 추가 (최소 3글자 이상)
+                                    if len(name) > 3:
                                         table_data.append({
                                             "보험회사": parts[0].strip(),
                                             "상품명": name,
@@ -78,10 +80,13 @@ if sheet:
                                         })
                             
                             if table_data:
+                                # 상품명 중복 최종 제거 후 출력
                                 final_df = pd.DataFrame(table_data).drop_duplicates(subset=['상품명'], keep='first')
                                 st.table(final_df)
-                            else: st.info("유효한 유지계약 정보가 없습니다.")
-                        else: st.info("등록된 유지계약 정보가 없습니다.")
+                            else:
+                                st.info("정상 유지 중인 계약 데이터가 없습니다.")
+                        else:
+                            st.info("등록된 유지계약 정보가 없습니다.")
                         
                         st.markdown("---")
                         c1, c2 = st.columns(2)
@@ -90,13 +95,13 @@ if sheet:
                             st.write(f"**주소:** {row.get('주소', '-')}")
                         with c2:
                             st.write(f"**차량:** {row.get('차량번호', '미등록')} / **자동차만기:** {row.get('자동차만기일', '-')}")
-                            st.info(f"**💡 기타 특이사항:** {memo_raw.split('[보장분석]')[0].strip()}")
+                            st.info(f"**💡 기타특이사항:** {memo_raw.split('[보장분석]')[0].strip()}")
             else: st.info("검색 결과가 없습니다.")
 
-    # [TAB 2] AI 정보 등록 및 병합
+    # [TAB 2] AI 등록 로직
     with tab2:
-        st.subheader("📝 텍스트로 정보 등록 및 업데이트")
-        raw_text = st.text_area("고객 정보 입력", height=150)
+        st.subheader("📝 텍스트로 정보 등록/업데이트")
+        raw_text = st.text_area("정보를 자유롭게 입력하세요", height=200)
         if st.button("🚀 데이터 반영"):
             name, phone, ssn, addr, memo = "", "", "", "", ""
             lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
@@ -112,7 +117,6 @@ if sheet:
                     row_num = match_idx[-1] + 2
                     target_row = db.iloc[match_idx[-1]]
                     if not target_row['주민번호'] and ssn: sheet.update_cell(row_num, 3, ssn)
-                    if not target_row['주소'] and addr: sheet.update_cell(row_num, 5, addr)
                     if memo:
                         base = target_row['병력(특이사항)'].split('[보장분석]')[0]
                         final = (base + " " + memo).strip()
@@ -128,7 +132,7 @@ if sheet:
     with tab3:
         st.subheader("🚘 자동차 보험 업데이트")
         u_in = st.text_input("형식: 이름, 차량번호, 보험사, 만기일")
-        if st.button("✅ 차량 정보 반영"):
+        if st.button("✅ 반영"):
             p = [i.strip() for i in u_in.split(',')]
             if len(p) >= 4:
                 idx = db.index[db['이름'] == p[0]].tolist()
@@ -136,7 +140,7 @@ if sheet:
                     sheet.update_cell(idx[-1]+2, 13, p[1]); sheet.update_cell(idx[-1]+2, 14, p[2]); sheet.update_cell(idx[-1]+2, 15, p[3])
                     st.success("반영 완료!"); st.rerun()
 
-    # [TAB 4] 보장분석 PDF 업로드 (고도화 분석기)
+    # [TAB 4] PDF 분석 고도화
     with tab4:
         st.subheader("📄 보장분석 PDF 정밀 분석기")
         up_file = st.file_uploader("PDF 업로드", type=['pdf'])
@@ -154,9 +158,8 @@ if sheet:
                         if co and ("보험" in line or "공제" in line):
                             pr = re.search(r'\d{1,3}(?:,\d{3})*원', line)
                             dt = re.search(r'\d{4}[.\-/]\d{2}[.\-/]\d{2}', line)
-                            # 상품명 정밀 추출 로직
                             nm = line.split(co)[-1].split('원')[0].split('20')[0].replace("(", "").replace(")", "").strip()
-                            if len(nm) > 2:
+                            if len(nm) > 3:
                                 extracted.append(f"{co}/{nm}/{pr.group() if pr else '-'}/{dt.group() if dt else '-'}")
                     if extracted:
                         match_idx = db.index[db['이름'] == target_u].tolist()
@@ -164,5 +167,5 @@ if sheet:
                         cur_memo = db.iloc[match_idx[-1]]['병력(특이사항)'].split('[보장분석]')[0].strip()
                         final_memo = f"{cur_memo} | [보장분석] {' | '.join(list(set(extracted)))}"
                         sheet.update_cell(row_num, 7, final_memo)
-                        st.success(f"✅ {target_u}님 유효계약 정리 완료!"); st.rerun()
+                        st.success(f"✅ 분석 완료!"); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
