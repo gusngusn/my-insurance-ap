@@ -52,19 +52,18 @@ if sheet:
                         
                         if "[보장분석]" in memo_raw:
                             analysis_part = memo_raw.split("[보장분석]")[-1]
-                            # 데이터 정밀 파싱 (중복 및 찌꺼기 제거)
                             ins_items = [item.strip() for item in analysis_part.split('|') if item.strip()]
                             
                             table_data = []
                             for item in ins_items:
                                 # 필터링: 미납/해지/실효 및 불완전한 행 제외
-                                if any(k in item for k in ["미납", "해지", "실효", "보험사", "계약자", "납입주기"]): continue
+                                if any(k in item for k in ["미납", "해지", "실효", "종료", "보험사", "계약자", "납입주기"]): continue
                                 
                                 parts = item.split('/')
                                 if len(parts) >= 2:
-                                    # 상품명 정제: 특수문자, 숫자 인덱스, 무의미한 문구 제거
+                                    # 상품명 정제: 숫자 인덱스 제거 및 괄호 내용 삭제
                                     name = parts[1].strip()
-                                    name = re.sub(r'^\d+\s*', '', name) # 앞쪽 숫자 제거
+                                    name = re.sub(r'^\d+\s*', '', name) 
                                     name = re.sub(r'\(.*?\)|\[.*?\]', '', name).replace("무배당", "").strip()
                                     
                                     price = parts[2].strip() if len(parts) > 2 else "-"
@@ -81,7 +80,6 @@ if sheet:
                             if table_data:
                                 final_df = pd.DataFrame(table_data).drop_duplicates(subset=['상품명'], keep='first')
                                 st.table(final_df)
-                                st.caption("※ 미납/실효 건은 리스트에서 자동 제외되었습니다.")
                             else: st.info("유효한 유지계약 정보가 없습니다.")
                         else: st.info("등록된 유지계약 정보가 없습니다.")
                         
@@ -129,7 +127,7 @@ if sheet:
     # [TAB 3] 자동차 증권 업데이트
     with tab3:
         st.subheader("🚘 자동차 보험 업데이트")
-        u_in = st.text_input("이름, 차량번호, 보험사, 만기일")
+        u_in = st.text_input("형식: 이름, 차량번호, 보험사, 만기일")
         if st.button("✅ 차량 정보 반영"):
             p = [i.strip() for i in u_in.split(',')]
             if len(p) >= 4:
@@ -148,7 +146,6 @@ if sheet:
                 try:
                     with pdfplumber.open(up_file) as pdf:
                         text = "".join([p.extract_text() for p in pdf.pages if p.extract_text()])
-                    # 주요 보험사 리스트 및 패턴
                     cos = ["삼성화재", "DB손해", "현대해상", "KB손해", "메리츠", "한화손해", "흥국화재", "신한라이프", "교보생명", "삼성생명", "라이나", "동양생명", "에이스손해"]
                     extracted = []
                     for line in text.split('\n'):
@@ -157,6 +154,7 @@ if sheet:
                         if co and ("보험" in line or "공제" in line):
                             pr = re.search(r'\d{1,3}(?:,\d{3})*원', line)
                             dt = re.search(r'\d{4}[.\-/]\d{2}[.\-/]\d{2}', line)
+                            # 상품명 정밀 추출 로직
                             nm = line.split(co)[-1].split('원')[0].split('20')[0].replace("(", "").replace(")", "").strip()
                             if len(nm) > 2:
                                 extracted.append(f"{co}/{nm}/{pr.group() if pr else '-'}/{dt.group() if dt else '-'}")
@@ -166,5 +164,5 @@ if sheet:
                         cur_memo = db.iloc[match_idx[-1]]['병력(특이사항)'].split('[보장분석]')[0].strip()
                         final_memo = f"{cur_memo} | [보장분석] {' | '.join(list(set(extracted)))}"
                         sheet.update_cell(row_num, 7, final_memo)
-                        st.success(f"✅ {target_u}님 유효계약 {len(set(extracted))}건 정리 완료!"); st.rerun()
+                        st.success(f"✅ {target_u}님 유효계약 정리 완료!"); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
