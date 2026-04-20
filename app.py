@@ -2,12 +2,10 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import pdfplumber
 import re
-import plotly.graph_objects as go
 from datetime import datetime
 
-# --- 1. 보안 및 구글 시트 설정 ---
+# --- 보안 및 구글 시트 설정 ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
@@ -18,74 +16,46 @@ def get_gsheet():
         client = gspread.authorize(creds)
         return client.open_by_key(SHEET_ID).sheet1
     except Exception as e:
-        st.error(f"⚠️ 시트 연결 실패: {e}")
+        st.error(f"⚠️ 연결 실패: {e}")
         return None
 
-# --- 2. UI 구성 ---
-st.set_page_config(page_title="현우 통합 보험 v2.9", layout="wide")
-st.title("🛡️ 배현우 설계사 통합 관리 시스템 v2.9")
+st.set_page_config(page_title="현우 통합 보험 v3.1", layout="wide")
+st.title("🛡️ 배현우 설계사 통합 관리 시스템 v3.1")
 
 sheet = get_gsheet()
 
 if sheet:
-    raw_data = sheet.get_all_records()
-    db = pd.DataFrame(raw_data).fillna("")
+    db = pd.DataFrame(sheet.get_all_records()).fillna("")
 
-    tab1, tab2 = st.tabs(["🔍 고객 조회 및 업데이트", "✍️ AI 고객 정보 자동 등록"])
+    tab1, tab2 = st.tabs(["🔍 고객 조회", "🚘 자동차 증권 자동 입력"])
 
-    # [TAB 1] 고객 조회
-    with tab1:
-        search_name = st.text_input("🔎 검색할 고객 성함을 입력하세요")
-        if search_name:
-            user_data = db[db['이름'].astype(str).str.contains(search_name)]
-            if not user_data.empty:
-                for idx, row in user_data.iterrows():
-                    with st.expander(f"👤 {row['이름']} 상세 정보", expanded=True):
-                        st.write(f"**연락처:** {row['연락처']} | **주민번호:** {row['주민번호']}")
-                        st.write(f"**주소:** {row['주소']} | **직업:** {row['직업']}")
-                        st.info(f"**특이사항:** {row['병력(특이사항)']}")
-
-    # [TAB 2] 신규 고객 자동 등록 (고급 파싱 로직 적용)
     with tab2:
-        st.subheader("📝 텍스트로 신규 고객 등록")
-        st.write("주신 정보를 아래 칸에 그대로 복사해서 붙여넣으세요.")
-        raw_text = st.text_area("고객 정보 입력란", height=250, placeholder="이름\n주민번호\n연락처\n주소\n직업 순으로 입력 시 가장 정확합니다.")
+        st.subheader("📄 증권 데이터 자동 매칭")
+        st.info("💡 Gemini가 분석해준 텍스트를 아래에 그대로 붙여넣으세요.")
+        raw_input = st.text_area("데이터 입력창", height=150)
         
-        if st.button("🚀 분석 및 구글 시트 저장"):
-            # 데이터 추출용 변수 초기화
-            name, ssn, phone, addr, job = "", "", "", "", ""
+        if st.button("🚀 클라우드 데이터 즉시 업데이트"):
+            # 데이터 추출 (이름, 차량번호, 보험사, 만기일 순)
+            parts = [p.strip() for p in raw_input.split(',')]
             
-            # 1. 줄바꿈 기준으로 데이터 분리
-            lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-            
-            for line in lines:
-                # 연락처 패턴 (010으로 시작하는 숫자 조합)
-                if re.search(r'010[ \-]?\d{3,4}[ \-]?\d{4}', line):
-                    phone = line.replace(" ", "-")
-                # 주민번호 패턴 (6자리-7자리 또는 13자리 숫자)
-                elif re.search(r'\d{6}[ \-]?\d{7}', line):
-                    ssn = line
-                # 주소 키워드 (시, 구, 로, 길, 동 등 주소 관련 단어 포함 시)
-                elif any(keyword in line for keyword in ["시", "구", "로", "길", "동", "번지"]):
-                    addr = line
-                # 이름 (보통 첫 번째 줄이 이름일 확률이 높음)
-                elif line == lines[0]:
-                    name = line
-                # 직업 (그 외 짧은 문구는 직업으로 간주)
-                elif len(line) < 10 and not job:
-                    job = line
-
-            if name and phone:
-                new_row = [
-                    datetime.now().strftime("%Y-%m-%d"), # 날짜
-                    name, ssn, phone, addr, job, 
-                    "", # 병력 특이사항 (초기값)
-                    name, # 가족대표 (본인)
-                    0, 0, 0, 0 # 암, 뇌, 심, 수술 (보장 금액 초기화)
-                ]
-                sheet.append_row(new_row)
-                st.balloons()
-                st.success(f"✅ {name} 고객님이 성공적으로 등록되었습니다!")
-                st.rerun()
+            if len(parts) >= 4:
+                target_name = parts[0]
+                car_no = parts[1]
+                company = parts[2]
+                expiry = parts[3]
+                
+                try:
+                    # 고객 찾기
+                    row_idx = db.index[db['이름'] == target_name][0] + 2
+                    
+                    # 시트 업데이트 (13:차량번호, 14:보험사, 15:만기일)
+                    sheet.update_cell(row_idx, 13, car_no)
+                    sheet.update_cell(row_idx, 14, company)
+                    sheet.update_cell(row_idx, 15, expiry)
+                    
+                    st.success(f"✅ {target_name} 고객님 차량({car_no}) 정보가 업데이트되었습니다!")
+                    st.balloons()
+                except:
+                    st.error(f"'{target_name}' 고객님을 DB에서 찾을 수 없습니다.")
             else:
-                st.error("성함과 연락처 정보를 인식하지 못했습니다. 형식을 다시 확인해주세요.")
+                st.error("데이터 형식이 올바르지 않습니다.")
