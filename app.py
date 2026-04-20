@@ -6,16 +6,22 @@ import pdfplumber
 import re
 import plotly.graph_objects as go
 
-# --- 구글 시트 API 설정 ---
+# --- 1. 보안 및 구글 시트 설정 ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
 def get_gsheet():
-    creds = ServiceAccountCredentials.from_json_keyfile_name('key.json', scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(SHEET_ID).sheet1
+    try:
+        # [중요] 파일(key.json)을 찾지 않고, 설정창(Secrets)의 정보를 직접 사용합니다.
+        creds_info = st.secrets["gcp_service_account"]
+        creds = ServiceAccountCredentials.from_json_dict(creds_info, scope)
+        client = gspread.authorize(creds)
+        return client.open_by_key(SHEET_ID).sheet1
+    except Exception as e:
+        st.error(f"⚠️ 시트 연결 실패: {e}")
+        return None
 
-# PDF 분석 로직
+# PDF에서 보장 금액 추출하는 함수
 def analyze_insurance_pdf(file):
     text = ""
     with pdfplumber.open(file) as pdf:
@@ -34,43 +40,75 @@ def analyze_insurance_pdf(file):
         res[k] = int(match.group(2).replace(',', '')) // 10000 if match else 0
     return res
 
-st.set_page_config(page_title="현우 클라우드 보험 v2.5", layout="wide")
-st.title("🚀 실시간 보장분석 자동 업데이트 시스템")
+# --- 2. 화면 구성 ---
+st.set_page_config(page_title="현우 통합 보험 v2.6", layout="wide")
+st.title("🛡️ 배현우 설계사 통합 관리 시스템 v2.6")
 
-tab1, tab2 = st.tabs(["🔍 고객 조회 및 분석", "📊 전체 현황"])
+sheet = get_gsheet()
 
-with tab1:
-    sheet = get_gsheet()
-    data = pd.DataFrame(sheet.get_all_records())
-    
-    search_name = st.selectbox("고객을 선택하세요", ["선택하세요"] + list(data['이름'].unique()))
-    
-    if search_name != "선택하세요":
-        user_idx = data.index[data['이름'] == search_name][0]
-        row = data.iloc[user_idx]
+if sheet:
+    # 실시간 데이터 로드
+    data = pd.DataFrame(sheet.get_all_records()).fillna("")
+
+    tab1, tab2 = st.tabs(["🔍 고객 조회 및 자동차보험", "📄 보장분석 자동 업데이트"])
+
+    # [TAB 1] 고객 검색 및 자동차보험 버튼
+    with tab1:
+        search_name = st.text_input("🔎 검색할 고객 성함을 입력하세요")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader(f"📄 {search_name}님 보장분석 업로드")
-            uploaded_pdf = st.file_uploader("보장분석 PDF 파일을 올려주세요", type="pdf")
-            
-            if uploaded_pdf:
-                analysis = analyze_insurance_pdf(uploaded_pdf)
-                st.write("🔍 **분석된 보장금액:**")
-                st.write(f"암: {analysis['암']}만 / 뇌: {analysis['뇌']}만 / 심: {analysis['심']}만 / 수술: {analysis['수술']}만")
-                
-                if st.button("✅ 분석 결과 구글 시트에 즉시 반영"):
-                    # 구글 시트의 해당 행을 찾아 업데이트 (A, B, C... 열 순서에 맞춰 수정 필요)
-                    # 예: 암(I열), 뇌(J열), 심(K열), 수술(L열) 기준
-                    sheet.update_cell(user_idx + 2, 9, analysis['암'])   # 9번째 열: 암
-                    sheet.update_cell(user_idx + 2, 10, analysis['뇌'])  # 10번째 열: 뇌
-                    sheet.update_cell(user_idx + 2, 11, analysis['심'])  # 11번째 열: 심
-                    sheet.update_cell(user_idx + 2, 12, analysis['수술']) # 12번째 열: 수술
-                    st.success("🎉 구글 시트 업데이트 완료! 어디서든 확인 가능합니다.")
-                    st.rerun()
+        if search_name:
+            user_data = data[data['이름'].astype(str).str.contains(search_name)]
+            if not user_data.empty:
+                for idx, row in user_data.iterrows():
+                    with st.expander(f"👤 {row['이름']} 상세 정보", expanded=True):
+                        # 버튼 배치
+                        btn_col, _ = st.columns([1, 4])
+                        show_car = btn_col.toggle("🚗 자동차보험 모드", key=f"car_tgl_{idx}")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("### 📋 인적사항")
+                            st.write(f"**연락처:** {row['연락처']}")
+                            st.write(f"**주소:** {row['주소']}")
+                            st.info(f"**특이사항:** {row['병력(특이사항)']}")
+                        
+                        with col2:
+                            if show_car:
+                                st.markdown("### 🚘 자동차보험 현황")
+                                # 시트에 해당 컬럼이 있는지 확인 후 출력
+                                st.warning(f"**차량번호:** {row.get('차량번호', '미등록')}")
+                                st.write(f"**보험사:** {row.get('보험사', '미등록')}")
+                                st.write(f"**만기일:** {row.get('자동차만기일', '미등록')}")
+                            else:
+                                st.markdown("### 📊 보장 현황")
+                                try:
+                                    vals = [float(row['암']), float(row['뇌']), float(row['심']), float(row['수술'])]
+                                    fig = go.Figure(go.Scatterpolar(r=vals, theta=['암', '뇌', '심', '수술'], fill='toself'))
+                                    fig.update_layout(height=300, margin=dict(l=20,r=20,b=20,t=20))
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except:
+                                    st.write("금액 데이터를 확인해주세요.")
 
-        with col2:
-            st.subheader("📊 현재 보장 그래프")
-            vals = [float(row['암']), float(row['뇌']), float(row['심']), float(row['수술'])]
-            fig = go.Figure(go.Scatterpolar(r=vals, theta=['암', '뇌', '심', '수술'], fill='toself'))
-            st.plotly_chart(fig, use_container_width=True)
+    # [TAB 2] PDF 업로드 시 실시간 시트 업데이트
+    with tab2:
+        st.subheader("📄 보장분석 PDF 실시간 업데이트")
+        target_customer = st.selectbox("업데이트할 고객 선택", ["선택하세요"] + list(data['이름'].unique()))
+        pdf_file = st.file_uploader("PDF 파일을 올려주세요", type="pdf")
+        
+        if target_customer != "선택하세요" and pdf_file:
+            analysis = analyze_insurance_pdf(pdf_file)
+            st.success(f"분석 결과: 암 {analysis['암']}만 / 뇌 {analysis['뇌']}만 / 심 {analysis['심']}만 / 수술 {analysis['수술']}만")
+            
+            if st.button("✅ 분석 결과를 구글 시트에 즉시 반영"):
+                # 해당 고객의 행(Row) 번호 찾기 (헤더 제외 +2)
+                row_num = data.index[data['이름'] == target_customer][0] + 2
+                
+                # 암(9열), 뇌(10열), 심(11열), 수술(12열) 업데이트
+                sheet.update_cell(row_num, 9, analysis['암'])
+                sheet.update_cell(row_num, 10, analysis['뇌'])
+                sheet.update_cell(row_num, 11, analysis['심'])
+                sheet.update_cell(row_num, 12, analysis['수술'])
+                
+                st.balloons()
+                st.success(f"{target_customer}님의 데이터가 클라우드에 저장되었습니다!")
+                st.rerun()
