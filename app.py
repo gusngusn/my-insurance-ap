@@ -33,7 +33,7 @@ if sheet:
 
     tab1, tab2 = st.tabs(["🔍 고객 조회 및 업데이트", "✍️ AI 고객 정보 자동 등록"])
 
-    # [TAB 1] 기존 조회 및 PDF 업데이트 기능 통합
+    # [TAB 1] 고객 조회
     with tab1:
         search_name = st.text_input("🔎 검색할 고객 성함을 입력하세요")
         if search_name:
@@ -45,50 +45,47 @@ if sheet:
                         st.write(f"**주소:** {row['주소']} | **직업:** {row['직업']}")
                         st.info(f"**특이사항:** {row['병력(특이사항)']}")
 
-    # [TAB 2] 신규 고객 자동 등록 (로직 강화)
+    # [TAB 2] 신규 고객 자동 등록 (고급 파싱 로직 적용)
     with tab2:
         st.subheader("📝 텍스트로 신규 고객 등록")
-        raw_text = st.text_area("고객 정보를 자유롭게 붙여넣으세요", height=200, placeholder="이름, 주민번호, 연락처, 주소, 직업 등")
+        st.write("주신 정보를 아래 칸에 그대로 복사해서 붙여넣으세요.")
+        raw_text = st.text_area("고객 정보 입력란", height=250, placeholder="이름\n주민번호\n연락처\n주소\n직업 순으로 입력 시 가장 정확합니다.")
         
         if st.button("🚀 분석 및 구글 시트 저장"):
-            # 정규표현식으로 정보 추출
-            name = ""
-            ssn = ""
-            phone = ""
-            addr = ""
-            job = ""
+            # 데이터 추출용 변수 초기화
+            name, ssn, phone, addr, job = "", "", "", "", ""
             
-            # 1. 연락처 추출 (010-XXXX-XXXX 또는 010 XXXX XXXX)
-            phone_match = re.search(r'010[ \-]?\d{3,4}[ \-]?\d{4}', raw_text)
-            if phone_match: phone = phone_match.group().replace(" ", "-")
-            
-            # 2. 주민번호 추출 (XXXXXX-XXXXXXX)
-            ssn_match = re.search(r'\d{6}[ \-]?\d{7}', raw_text)
-            if ssn_match: ssn = ssn_match.group()
-            
-            # 3. 줄바꿈으로 데이터 쪼개기
+            # 1. 줄바꿈 기준으로 데이터 분리
             lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
             
-            # 4. 이름/주소/직업 추측 (보통 첫 줄이 이름, 주소 키워드 포함 시 주소)
             for line in lines:
-                if "대구" in line or "서울" in line or "길" in line or "동" in line:
-                    if not addr: addr = line
-                elif line == lines[0] and not name:
+                # 연락처 패턴 (010으로 시작하는 숫자 조합)
+                if re.search(r'010[ \-]?\d{3,4}[ \-]?\d{4}', line):
+                    phone = line.replace(" ", "-")
+                # 주민번호 패턴 (6자리-7자리 또는 13자리 숫자)
+                elif re.search(r'\d{6}[ \-]?\d{7}', line):
+                    ssn = line
+                # 주소 키워드 (시, 구, 로, 길, 동 등 주소 관련 단어 포함 시)
+                elif any(keyword in line for keyword in ["시", "구", "로", "길", "동", "번지"]):
+                    addr = line
+                # 이름 (보통 첫 번째 줄이 이름일 확률이 높음)
+                elif line == lines[0]:
                     name = line
-                elif len(line) < 10 and not job and line != name:
+                # 직업 (그 외 짧은 문구는 직업으로 간주)
+                elif len(line) < 10 and not job:
                     job = line
 
             if name and phone:
                 new_row = [
                     datetime.now().strftime("%Y-%m-%d"), # 날짜
                     name, ssn, phone, addr, job, 
-                    "", # 병력
-                    name, # 가족대표
-                    0, 0, 0, 0 # 보장금액 초기화
+                    "", # 병력 특이사항 (초기값)
+                    name, # 가족대표 (본인)
+                    0, 0, 0, 0 # 암, 뇌, 심, 수술 (보장 금액 초기화)
                 ]
                 sheet.append_row(new_row)
                 st.balloons()
                 st.success(f"✅ {name} 고객님이 성공적으로 등록되었습니다!")
                 st.rerun()
             else:
-                st.error("성함과 연락처를 인식하지 못했습니다. 형식을 확인해주세요.")
+                st.error("성함과 연락처 정보를 인식하지 못했습니다. 형식을 다시 확인해주세요.")
