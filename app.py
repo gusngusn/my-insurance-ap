@@ -21,22 +21,31 @@ def get_gsheet():
         st.error(f"⚠️ 시트 연결 실패: {e}")
         return None
 
-# --- [뉴스 스크래핑 함수] ---
+# --- [보험매일 실시간 뉴스 스크래핑 함수] ---
 def get_insurance_news():
     try:
-        url = "https://search.naver.com/search.naver?where=news&query=%EB%B3%B4%ED%97%98&sm=tab_pge&sort=1"
+        # 요청하신 보험매일 '종합/정책' 섹션 URL
+        url = "https://www.insnews.co.kr/news/articleList.html?sc_section_code=S1N2&view_type=sm"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        resp = requests.get(url, headers=headers, timeout=5)
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.encoding = 'utf-8' # 한글 깨짐 방지
         soup = BeautifulSoup(resp.text, 'html.parser')
-        news_items = soup.select(".news_tit")
+        
+        # 보험매일 기사 제목 및 링크 추출 (사이트 구조 반영)
+        news_list = soup.select(".list-titles a")
         
         results = []
-        for item in news_items[:5]:
-            results.append({"title": item.get_text(), "link": item.get('href')})
+        base_url = "https://www.insnews.co.kr"
+        for item in news_list[:7]: # 최신 뉴스 7개
+            title = item.get_text().strip()
+            link = item.get('href')
+            if link.startswith('/'): # 상대 경로일 경우 절대 경로로 변환
+                link = base_url + link
+            results.append({"title": title, "link": link})
         return results
-    except:
+    except Exception as e:
         return []
 
 # --- [기본 환경 설정] ---
@@ -51,7 +60,7 @@ with st.sidebar:
         ["🏠 홈", "🔍 고객조회/수정", "✍️ 고객정보 신규등록", "📑 고객리스트", "🚘 자동차증권 업데이트", "📄 보장분석리스트 입력", "🏥 보험청구 양식", "💬 고객문자발송(안내)"]
     )
     st.markdown("---")
-    st.caption("배현우 FC 전용 시스템 v7.7")
+    st.caption("배현우 FC 전용 시스템 v7.8")
 
 # 데이터 로드
 sheet = get_gsheet()
@@ -66,13 +75,13 @@ if menu == "🏠 홈":
     col1, col2 = st.columns([2, 1])
     with col1:
         st.info(f"현재 등록된 총 고객은 **{len(db)}명**입니다.")
-        st.markdown("### 📰 실시간 보험 뉴스")
+        st.markdown("### 📰 보험매일 실시간 뉴스 (종합/정책)")
         news_list = get_insurance_news()
         if news_list:
             for n in news_list:
                 st.markdown(f"• [{n['title']}]({n['link']})")
         else:
-            st.write("뉴스를 불러오는 중이거나 데이터가 없습니다.")
+            st.warning("뉴스를 불러올 수 없습니다. 사이트 접근 권한이나 연결 상태를 확인하세요.")
 
 elif menu == "🔍 고객조회/수정":
     st.subheader("🔍 고객 상세 조회")
@@ -158,4 +167,4 @@ elif menu == "🏥 보험청구 양식":
 
 elif menu == "💬 고객문자발송(안내)":
     st.subheader("💬 고객 문자 발송 안내")
-    st.info("알리고(Aligo) API를 연동하면 이 화면에서 즉시 문자를 보낼 수 있습니다.")
+    st.info("알리고(Aligo) API를 연동하면 이 화면에서 즉시 만기 안내 문자를 보낼 수 있습니다.")
