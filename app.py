@@ -20,57 +20,50 @@ def get_gsheet():
         st.error(f"⚠️ 연결 실패: {e}")
         return None
 
-# --- 2. 화면 구성 ---
-st.set_page_config(page_title="현우 통합 보험 v3.5", layout="wide")
-st.title("🛡️ 배현우 설계사 통합 관리 시스템 v3.5")
+# 시스템 필수 헤더 정의
+EXPECTED_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
+
+st.set_page_config(page_title="현우 통합 보험 v3.6", layout="wide")
+st.title("🛡️ 배현우 설계사 통합 관리 시스템 v3.6")
 
 sheet = get_gsheet()
 
-# 필수 헤더 목록
-EXPECTED_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
-
 if sheet:
     try:
-        # 데이터 읽기 시도
-        raw_data = sheet.get_all_records()
+        # [중요 수정] get_all_records() 대신 get_all_values()를 사용해 중복 헤더 에러를 원천 차단합니다.
+        all_values = sheet.get_all_values()
         
-        # 만약 시트가 완전히 비어있거나 헤더가 없으면 자동 생성
-        if not raw_data:
-            existing_headers = sheet.row_values(1)
-            if not existing_headers:
+        if len(all_values) <= 1: # 데이터가 없거나 제목만 있는 경우
+            if not all_values:
                 sheet.insert_row(EXPECTED_HEADERS, 1)
-                st.info("💡 시트에 헤더가 없어 자동으로 생성했습니다. 새로고침(F5) 해주세요.")
             db = pd.DataFrame(columns=EXPECTED_HEADERS)
         else:
-            db = pd.DataFrame(raw_data).fillna("")
+            # 첫 줄은 무시하고 미리 정의된 EXPECTED_HEADERS를 컬럼명으로 사용
+            # 실제 데이터 행 개수에 맞춰 데이터프레임 생성
+            db = pd.DataFrame(all_values[1:], columns=EXPECTED_HEADERS[:len(all_values[0])])
+            db = db.fillna("")
             
     except Exception as e:
-        # 헤더 오류(중복된 제목 등) 발생 시 대응
-        st.error(f"⚠️ 시트 구조 오류: {e}")
-        st.info("💡 구글 시트의 1행에 중복된 제목이 있는지, 혹은 1행이 비어있는지 확인해주세요.")
-        # 강제로 헤더를 읽어오기 위한 대체 로직
-        data_values = sheet.get_all_values()
-        if data_values:
-            db = pd.DataFrame(data_values[1:], columns=data_values[0]).fillna("")
-        else:
-            db = pd.DataFrame(columns=EXPECTED_HEADERS)
+        st.error(f"⚠️ 데이터 로드 오류: {e}")
+        st.info("💡 구글 시트의 1행(제목줄)을 확인해 주세요.")
+        db = pd.DataFrame(columns=EXPECTED_HEADERS)
 
+    # 탭 구성 (v3.5와 동일)
     tab1, tab2, tab3 = st.tabs(["🔍 고객 조회 및 업데이트", "✍️ AI 고객 정보 등록", "🚘 자동차 증권 업데이트"])
 
     # [TAB 1] 고객 조회
     with tab1:
-        search_name = st.text_input("🔎 검색할 고객 성함을 입력하세요")
+        search_name = st.text_input("🔎 검색할 고객 성함")
         if search_name:
             search_results = db[db['이름'].astype(str).str.contains(search_name)]
             unique_results = search_results.drop_duplicates(subset=['이름', '연락처'], keep='last')
-            
             if not unique_results.empty:
                 for idx, row in unique_results.iterrows():
-                    with st.expander(f"👤 {row['이름']} 상세 정보", expanded=True):
+                    with st.expander(f"👤 {row['이름']} ({row['연락처']}) 상세 정보", expanded=True):
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.write(f"**연락처:** {row.get('연락처', '-')}")
                             st.write(f"**주민번호:** {row.get('주민번호', '-')}")
+                            st.write(f"**주소:** {row.get('주소', '-')}")
                             st.success(f"**💡 특이사항/계좌:** {row.get('병력(특이사항)', '-')}")
                         with col2:
                             st.warning(f"**차량:** {row.get('차량번호', '미등록')} / **보험사:** {row.get('보험사', '미등록')}")
@@ -78,11 +71,10 @@ if sheet:
             else:
                 st.info("검색 결과가 없습니다.")
 
-    # [TAB 2] 신규 등록 (계좌 및 중복 방지 로직 포함)
+    # [TAB 2] 신규 등록 (중복 방지 포함)
     with tab2:
         st.subheader("📝 텍스트로 고객 등록/업데이트")
-        raw_text = st.text_area("고객 정보를 입력하세요 (이름, 주민, 연락처, 주소, 직업, 계좌 등)", height=200)
-        
+        raw_text = st.text_area("고객 정보 입력 (이름, 주민, 연락처, 주소, 직업, 계좌 등)", height=200)
         if st.button("🚀 분석 및 저장"):
             name, ssn, phone, addr, job, memo = "", "", "", "", "", ""
             lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
@@ -95,7 +87,6 @@ if sheet:
                 else: memo += f"{line} "
 
             if name:
-                # 중복 확인
                 is_dup = not db[(db['이름'] == name) & (db['연락처'] == phone)].empty if not db.empty else False
                 if is_dup:
                     st.warning(f"⚠️ {name}님은 이미 등록된 고객입니다.")
@@ -119,7 +110,7 @@ if sheet:
                     sheet.update_cell(row_num, 13, t_car)
                     sheet.update_cell(row_num, 14, t_comp)
                     sheet.update_cell(row_num, 15, t_exp)
-                    st.success(f"✅ {t_name}님 차량 정보 업데이트 완료!")
+                    st.success(f"✅ {t_name}님 정보 업데이트 완료!")
                     st.rerun()
                 else:
                     st.error(f"'{t_name}' 고객님을 찾을 수 없습니다.")
