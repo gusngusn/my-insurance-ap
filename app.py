@@ -5,10 +5,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 import re
 from datetime import datetime
 
-# --- [보안 설정] 접속 비밀번호 ---
+# --- [보안 설정] ---
 ACCESS_PASSWORD = "123456" 
-
-# --- 1. 구글 시트 연결 설정 ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
@@ -19,11 +17,10 @@ def get_gsheet():
         client = gspread.authorize(creds)
         return client.open_by_key(SHEET_ID).get_worksheet(0)
     except Exception as e:
-        st.error(f"⚠️ 시트 연결 실패: {e}")
+        st.error(f"⚠️ 연결 실패: {e}")
         return None
 
 EXPECTED_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
-
 st.set_page_config(page_title="배현우 고객관리 시스템", layout="wide")
 
 if "authenticated" not in st.session_state:
@@ -36,105 +33,98 @@ if not st.session_state["authenticated"]:
         if pwd_input == ACCESS_PASSWORD:
             st.session_state["authenticated"] = True
             st.rerun()
-        else:
-            st.error("❌ 비밀번호가 올바르지 않습니다.")
+        else: st.error("❌ 비밀번호 오류")
     st.stop()
 
-# --- 메인 프로그램 시작 ---
-st.title("🛡️ 배현우 고객관리 시스템 v7.2")
+# --- 사이드바 메뉴 리스트 ---
+with st.sidebar:
+    st.header("📋 메뉴 리스트")
+    menu = st.radio(
+        "이동할 메뉴를 선택하세요",
+        ["🏠 홈", "🔍 고객조회/수정", "✍️ 고객정보 신규등록", "📑 고객리스트 (전체)", "🚘 자동차증권 업데이트", "📄 보장분석리스트 입력", "🏥 보험청구 양식", "💬 고객문자발송(안내)"]
+    )
+    st.markdown("---")
+    st.caption("v7.3 배현우 FC 전용 시스템")
 
 sheet = get_gsheet()
+all_values = sheet.get_all_values() if sheet else []
+db = pd.DataFrame(all_values[1:], columns=EXPECTED_HEADERS[:len(all_values[0])]) if all_values else pd.DataFrame(columns=EXPECTED_HEADERS)
+db = db.fillna("")
 
-if sheet:
-    all_values = sheet.get_all_values()
-    db = pd.DataFrame(all_values[1:], columns=EXPECTED_HEADERS[:len(all_values[0])]) if all_values else pd.DataFrame(columns=EXPECTED_HEADERS)
-    db = db.fillna("")
+# --- 메뉴별 화면 구현 ---
 
-    tab1, tab2, tab3, tab4 = st.tabs(["🔍 고객 조회/수정", "✍️ 고객정보 신규등록", "🚘 자동차증권 업데이트", "📄 보장분석 리스트 입력"])
+if menu == "🏠 홈":
+    st.subheader("🏠 메인 대시보드")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("전체 고객 수", f"{len(db)}명")
+    col2.metric("이번 달 신규", f"{len(db[db['날짜'].str.contains(datetime.now().strftime('%Y-%m'))])}명")
+    st.info("왼쪽 메뉴를 통해 업무를 시작하세요.")
 
-    # [TAB 2] 고객정보 신규등록 (한 줄 간편 등록 기능 추가)
-    with tab2:
-        st.subheader("📝 신규 고객 등록")
-        
-        # --- NEW: 한 줄 간편 등록 섹션 ---
-        with st.expander("🚀 한 줄로 간편 등록하기 (채팅창 내용 복사용)", expanded=True):
-            quick_input = st.text_input("가공된 텍스트를 여기에 붙여넣으세요", placeholder="이흥식, 560310-1673932, 010-9646-4275, 대구 동구...")
-            if st.button("즉시 등록"):
-                if quick_input:
-                    try:
-                        data = [i.strip() for i in quick_input.split(',')]
-                        # 최소 이름, 주민, 연락처, 주소 4개 항목 보장
-                        q_name = data[0] if len(data) > 0 else ""
-                        q_ssn = data[1] if len(data) > 1 else ""
-                        q_phone = data[2] if len(data) > 2 else ""
-                        q_addr = data[3] if len(data) > 3 else ""
-                        
-                        if q_name and q_phone:
-                            new_row = [datetime.now().strftime("%Y-%m-%d"), q_name, q_ssn, q_phone, q_addr, "", "", q_name, "", "", "", "", "", "", ""]
-                            sheet.append_row(new_row)
-                            st.success(f"✅ {q_name}님 간편 등록 완료!")
-                            st.rerun()
-                        else:
-                            st.error("데이터 형식이 맞지 않습니다. 이름과 연락처는 필수입니다.")
-                    except Exception as e:
-                        st.error(f"오류 발생: {e}")
+elif menu == "🔍 고객조회/수정":
+    st.subheader("🔍 고객 상세 조회")
+    name = st.text_input("고객 성함 입력")
+    if name:
+        res = db[db['이름'].str.contains(name)]
+        for _, row in res.iterrows():
+            with st.expander(f"👤 {row['이름']} ({row['연락처']})", expanded=True):
+                st.write(f"주소: {row['주소']} / 주민번호: {row['주민번호']}")
+                if row['차량번호']: st.success(f"자동차: {row['차량번호']} ({row['보험사']}) - 만기: {row['자동차만기일']}")
 
-        st.markdown("---")
-        st.write("▼ 직접 상세 입력하기")
-        with st.form("detail_reg"):
-            c1, c2 = st.columns(2)
-            n, p = c1.text_input("성함*"), c2.text_input("연락처*")
-            s, a = c1.text_input("주민번호"), c2.text_input("주소")
-            m = st.text_area("특이사항")
-            if st.form_submit_button("상세 등록 저장") and n and p:
-                sheet.append_row([datetime.now().strftime("%Y-%m-%d"), n, s, p, a, "", m, n, "", "", "", "", "", "", ""])
-                st.success(f"✅ {n}님 등록 완료!"); st.rerun()
+elif menu == "✍️ 고객정보 신규등록":
+    st.subheader("✍️ 신규 고객 등록")
+    quick = st.text_input("🚀 한 줄 간편 등록 (이름, 주민, 번호, 주소)")
+    if st.button("즉시 등록") and quick:
+        d = [i.strip() for i in quick.split(',')]
+        new_row = [datetime.now().strftime("%Y-%m-%d"), d[0], d[1] if len(d)>1 else "", d[2] if len(d)>2 else "", d[3] if len(d)>3 else "", "", "", d[0]] + [""]*7
+        sheet.append_row(new_row); st.success("완료"); st.rerun()
 
-    # [TAB 1, 3, 4] 기존 기능 유지 (생략 없이 포함)
-    with tab1:
-        search_name = st.text_input("🔎 고객 성함 검색")
-        if search_name:
-            res = db[db['이름'].astype(str).str.contains(search_name)]
-            if not res.empty:
-                for idx, row in res.iterrows():
-                    with st.expander(f"👤 {row['이름']} ({row['연락처']})", expanded=True):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write(f"**주민번호:** {row['주민번호']}")
-                            st.write(f"**주소:** {row['주소']}")
-                        with col2:
-                            if row['차량번호']:
-                                st.success(f"**차량:** {row['차량번호']} ({row['보험사']})")
-                                st.warning(f"**만기:** {row['자동차만기일']}")
-                        st.markdown("---")
-                        memo = row['병력(특이사항)']
-                        if "[보장분석]" in memo:
-                            analysis_part = memo.split("[보장분석]")[-1]
-                            raw_items = [i.strip() for i in analysis_part.split('|') if i.strip()]
-                            refined_list = [{"보험사": p.split('/')[0], "상품명": p.split('/')[1], "료": p.split('/')[2] if len(p.split('/'))>2 else "-", "일": p.split('/')[3] if len(p.split('/'))>3 else "-"} for p in raw_items if len(p.split('/'))>=2]
-                            if refined_list: st.table(pd.DataFrame(refined_list))
-                            st.info(f"**💡 특이사항:** {memo.split('[보장분석]')[0].strip()}")
-                        else: st.info(f"**💡 특이사항:** {memo}")
+elif menu == "📑 고객리스트 (전체)":
+    st.subheader("📑 전체 고객 리스트 (페이지당 30명)")
+    page_size = 30
+    total_pages = (len(db) // page_size) + (1 if len(db) % page_size > 0 else 0)
+    page = st.number_input("페이지 선택", min_value=1, max_value=max(1, total_pages), step=1)
+    start_idx = (page - 1) * page_size
+    st.table(db[['날짜', '이름', '연락처', '주소', '자동차만기일']].iloc[start_idx : start_idx + page_size])
 
-    with tab3:
-        st.subheader("🚘 자동차 업데이트")
-        v_in = st.text_input("이름, 차량번호, 보험사, 만기일")
-        if st.button("자동차 반영"):
-            ps = [x.strip() for x in v_in.split(',')]
-            if len(ps) >= 4:
-                idx = db.index[db['이름'] == ps[0]].tolist()
-                if idx:
-                    r = idx[-1] + 2
-                    sheet.update_cell(r, 13, ps[1]); sheet.update_cell(r, 14, ps[2]); sheet.update_cell(r, 15, ps[3])
-                    st.success("업데이트 완료!"); st.rerun()
+elif menu == "🚘 자동차증권 업데이트":
+    st.subheader("🚘 자동차 정보 업데이트")
+    v_in = st.text_input("양식: 이름, 차량번호, 보험사, 만기일")
+    if st.button("반영"):
+        p = [x.strip() for x in v_in.split(',')]
+        idx = db.index[db['이름'] == p[0]].tolist()
+        if idx:
+            r = idx[-1] + 2
+            sheet.update_cell(r, 13, p[1]); sheet.update_cell(r, 14, p[2]); sheet.update_cell(r, 15, p[3])
+            st.success("반영 완료"); st.rerun()
 
-    with tab4:
-        st.subheader("📄 보장분석 입력")
-        target_u = st.selectbox("고객 선택", ["선택"] + db['이름'].unique().tolist())
-        u_input = st.text_area("보장분석 결과 (내용 복사 후 붙여넣기)")
-        if st.button("보장분석 반영"):
-            if target_u != "선택" and u_input:
-                m_idx = db.index[db['이름'] == target_u].tolist()[-1]
-                cur_m = db.iloc[m_idx]['병력(특이사항)'].split('[보장분석]')[0].strip()
-                sheet.update_cell(m_idx + 2, 7, f"{cur_m} | [보장분석] {u_input}")
-                st.success("반영 완료!"); st.rerun()
+elif menu == "📄 보장분석리스트 입력":
+    st.subheader("📄 보장분석 결과 입력")
+    target = st.selectbox("고객 선택", db['이름'].unique())
+    u_in = st.text_area("내용 붙여넣기 (사/품/료/일 | ...)")
+    if st.button("업데이트"):
+        idx = db.index[db['이름'] == target].tolist()[-1]
+        old = db.iloc[idx]['병력(특이사항)'].split('[보장분석]')[0].strip()
+        sheet.update_cell(idx + 2, 7, f"{old} | [보장분석] {u_in}")
+        st.success("업데이트 완료"); st.rerun()
+
+elif menu == "🏥 보험청구 양식":
+    st.subheader("🏥 주요 보험사 보험청구 양식 다운로드")
+    st.markdown("""
+    * [삼성화재 청구양식](https://www.samsungfire.com/customer/claim/reward/reward_01.html)
+    * [DB손해보험 청구양식](https://www.idbins.com/FWCRRE1001.do)
+    * [현대해상 청구양식](https://www.hi.co.kr/service/claim/guide/form.do)
+    * [메리츠화재 청구양식](https://www.meritzfire.com/compensation/guide/claim-guide.do)
+    * [KB손해보험 청구양식](https://www.kbinsure.co.kr/CG302010001.ec)
+    """)
+
+elif menu == "💬 고객문자발송(안내)":
+    st.subheader("💬 고객 문자 발송 시스템 안내")
+    st.write("시스템에서 직접 문자를 보내려면 **알리고(Aligo)** 같은 SMS API 연동이 필요합니다.")
+    st.info("""
+    **[문자 발송 구현 방법]**
+    1. **알리고(aligo.in)** 회원가입 후 API Key 발급
+    2. 파이썬 `requests` 라이브러리를 통해 API 호출 코드 삽입
+    3. 버튼 하나로 '자동차 만기 안내' 또는 '생일 축하' 문자 자동 발송 가능
+    
+    *필요하시면 알리고 연동 코드를 짜드릴 수 있습니다. (발송당 비용 약 8~10원 발생)*
+    """)
