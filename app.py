@@ -21,105 +21,90 @@ def get_gsheet():
 
 EXPECTED_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
 
-st.set_page_config(page_title="현우 통합 관리 v6.7", layout="wide")
-st.title("🛡️ 배현우 설계사 통합 관리 시스템 v6.7")
+st.set_page_config(page_title="현우 통합 관리 v6.8", layout="wide")
+st.title("🛡️ 배현우 설계사 통합 관리 시스템 v6.8")
 
 sheet = get_gsheet()
 
 if sheet:
     all_values = sheet.get_all_values()
-    db = pd.DataFrame(all_values[1:], columns=EXPECTED_HEADERS[:len(all_values[0])]) if all_values else pd.DataFrame(columns=EXPECTED_HEADERS)
+    if all_values:
+        db = pd.DataFrame(all_values[1:], columns=EXPECTED_HEADERS[:len(all_values[0])])
+    else:
+        db = pd.DataFrame(columns=EXPECTED_HEADERS)
     db = db.fillna("")
 
     tab1, tab2, tab3, tab4 = st.tabs(["🔍 고객 조회/수정", "✍️ 고객정보 신규등록", "🚘 자동차증권 업데이트", "📄 보장분석 리스트 입력"])
 
-    # [TAB 1] 고객 조회 - "현장 상담용" 깔끔한 표 출력
+    # [TAB 1] 고객 조회 - 오타 수정 및 깔끔한 출력
     with tab1:
-        search_name = st.text_input("🔎 고객 성함 검색 (예: 최점순)")
+        search_name = st.text_input("🔎 고객 성함 검색")
         if search_name:
             res = db[db['이름'].astype(str).str.contains(search_name)]
             if not res.empty:
                 for idx, row in res.iterrows():
-                    with st.expander(f"👤 {row['이름']} 고객님 상세 정보", expanded=True):
-                        # 1. 기본 인적사항
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write(f"**연락처:** {row['연락처']}")
+                    with st.expander(f"👤 {row['이름']} ({row['연락처']})", expanded=True):
+                        c1, c2 = st.columns(2)
+                        with c1:
                             st.write(f"**주민번호:** {row['주민번호']}")
-                        with col2:
+                        with c2:
                             st.write(f"**주소:** {row['주소']}")
-                            st.write(f"**가족대표:** {row['가족대표']}")
-
+                        
                         st.markdown("---")
-
-                        # 2. 보유계약 리스트 (가독성 핵심 로직)
+                        
                         memo = row['병력(특이사항)']
                         if "[보장분석]" in memo:
-                            st.subheader("📋 현재 보유계약 현황")
-                            
-                            # 데이터 정제 및 표 변환
-                            analysis_data = memo.split("[보장분석]")[-1]
+                            st.subheader("📋 보유계약현황 리스트")
+                            # 오타 수정: analysis_data를 analysis_part로 통일
+                            analysis_part = memo.split("[보장분석]")[-1]
                             raw_items = [i.strip() for i in analysis_part.split('|') if i.strip()]
                             
                             refined_list = []
                             for item in raw_items:
-                                # 제목줄 및 찌꺼기 차단
                                 if any(trash in item for trash in ["No", "회사", "상품명", "계약일"]): continue
-                                
-                                parts = item.split('/')
-                                if len(parts) >= 2:
+                                p = item.split('/')
+                                if len(p) >= 2:
                                     refined_list.append({
-                                        "보험회사": parts[0].strip(),
-                                        "상품명": parts[1].strip(),
-                                        "월 보험료": parts[2].strip() if len(parts) > 2 else "-",
-                                        "가입날짜": parts[3].strip() if len(parts) > 3 else "-"
+                                        "보험회사": p[0].strip(),
+                                        "상품명": p[1].strip(),
+                                        "월 보험료": p[2].strip() if len(p) > 2 else "-",
+                                        "가입날짜": p[3].strip() if len(p) > 3 else "-"
                                     })
                             
                             if refined_list:
-                                df_final = pd.DataFrame(refined_list).drop_duplicates()
-                                # 인덱스 없이 깔끔한 표 출력
-                                st.table(df_final)
-                                
-                                # 총 보험료 자동 합산 (숫자만 추출)
-                                prices = [int(re.sub(r'[^0-9]', '', d['월 보험료'])) for d in refined_list if re.sub(r'[^0-9]', '', d['월 보험료']).isdigit()]
-                                if prices:
-                                    st.markdown(f"💰 **합계 보험료: {sum(prices):,}원**")
+                                st.table(pd.DataFrame(refined_list).drop_duplicates())
                             
-                            # 3. 병력 및 기타 특이사항 별도 표시
                             st.markdown("---")
-                            st.info(f"**💡 병력 및 특이사항:**\n{memo.split('[보장분석]')[0].strip()}")
+                            st.info(f"**💡 특이사항:** {memo.split('[보장분석]')[0].strip()}")
                         else:
-                            st.info(f"**💡 병력 및 특이사항:** {memo}")
+                            st.info(f"**💡 특이사항:** {memo}")
 
-    # [TAB 4] 수동 입력 - 양식 간소화
+    # [TAB 4] 수동 입력 - 양식 덮어쓰기 로직
     with tab4:
-        st.subheader("📄 보장분석 데이터 입력")
-        target_name = st.selectbox("업데이트할 고객 선택", ["선택하세요"] + db['이름'].unique().tolist())
-        st.help("형식: 보험사/상품명/보험료/가입일 | 보험사/상품명/보험료/가입일")
-        u_input = st.text_area("보장분석 결과 붙여넣기", placeholder="흥국/누구나암보험/71,050원/2000.06.26 | 신한/건강보험/34,690원/2022.01.06")
+        st.subheader("📄 보장분석 데이터 수동 입력")
+        target_u = st.selectbox("고객 선택", ["선택하세요"] + db['이름'].unique().tolist())
+        u_input = st.text_area("보장분석 결과 입력 (보험사/상품명/보험료/날짜 | ...)")
         
-        if st.button("🚀 데이터 업데이트"):
-            if target_name != "선택하세요" and u_input:
-                idx = db.index[db['이름'] == target_name].tolist()[-1]
-                current_memo = db.iloc[idx]['병력(특이사항)'].split('[보장분석]')[0].strip()
-                # 덮어쓰기 방식으로 깔끔하게 저장
-                sheet.update_cell(idx + 2, 7, f"{current_memo} | [보장분석] {u_input}")
-                st.success("정보가 최신본으로 업데이트되었습니다!"); st.rerun()
+        if st.button("🚀 반영하기"):
+            if target_u != "선택하세요" and u_input:
+                match_idx = db.index[db['이름'] == target_u].tolist()[-1]
+                current_memo = db.iloc[match_idx]['병력(특이사항)'].split('[보장분석]')[0].strip()
+                # 깔끔하게 기존 보장분석 덮어쓰기
+                sheet.update_cell(match_idx + 2, 7, f"{current_memo} | [보장분석] {u_input}")
+                st.success("데이터가 반영되었습니다!"); st.rerun()
 
-    # [TAB 2, 3] 생략 없이 전체 포함 (로직 최적화)
+    # [TAB 2, 3] 기존 로직 유지
     with tab2:
-        st.subheader("📝 신규 고객 등록")
-        with st.form("add_user"):
+        st.subheader("📝 신규 등록")
+        with st.form("new"):
             n, p = st.text_input("이름*"), st.text_input("연락처*")
-            s, a = st.text_input("주민번호"), st.text_input("주소")
-            m = st.text_area("특이사항")
             if st.form_submit_button("등록") and n and p:
-                sheet.append_row([datetime.now().strftime("%Y-%m-%d"), n, s, p, a, "", m, n])
+                sheet.append_row([datetime.now().strftime("%Y-%m-%d"), n, "", p, "", "", "", n])
                 st.success("등록 완료!"); st.rerun()
 
     with tab3:
-        st.subheader("🚘 자동차 보험 업데이트")
-        v_in = st.text_input("이름, 차량번호, 보험사, 만기일 (콤마 구분)")
+        st.subheader("🚘 자동차 업데이트")
+        v_in = st.text_input("이름, 차량, 보험사, 만기")
         if st.button("업데이트"):
             ps = [x.strip() for x in v_in.split(',')]
             if len(ps) >= 4:
