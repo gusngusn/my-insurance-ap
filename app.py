@@ -2,12 +2,16 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
+import requests
+import xml.etree.ElementTree as ET
 
 # --- [1. 구글 시트 연결 설정] ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
+@st.cache_resource
 def get_gsheets():
     try:
         creds_info = st.secrets["gcp_service_account"]
@@ -18,8 +22,24 @@ def get_gsheets():
     except:
         return None, None
 
-# --- [2. 데이터 로드 및 초기화] ---
-st.set_page_config(page_title="배현우 FC 시스템 v51.0", layout="wide")
+# --- [2. 보험 뉴스 스크래핑 함수] ---
+@st.cache_data(ttl=3600) # 1시간마다 갱신
+def get_insurance_news():
+    url = "https://news.google.com/rss/search?q=%EB%B3%B4%ED%97%98&hl=ko&gl=KR&ceid=KR:ko"
+    try:
+        resp = requests.get(url, timeout=5)
+        root = ET.fromstring(resp.content)
+        items = []
+        for item in root.findall('.//item')[:5]: # 최신 뉴스 5개 추출
+            title = item.find('title').text
+            link = item.find('link').text
+            items.append({"제목": title, "링크": link})
+        return items
+    except:
+        return []
+
+# --- [3. 데이터 로드 및 초기화] ---
+st.set_page_config(page_title="배현우 FC 시스템 v52.0", layout="wide")
 sheet1, sheet2 = get_gsheets()
 
 h1 = ["등록일자", "이름", "주민번호", "연락처", "주소", "직업", "계좌번호", "차량번호", "자동차보험회사", "가입일자"]
@@ -34,22 +54,90 @@ else:
     st.error("구글 시트 연결 실패"); st.stop()
 
 if "menu" not in st.session_state:
-    st.session_state.menu = "고객조회 및 수정"
+    st.session_state.menu = "메인 대시보드" # 기본 화면을 대시보드로 변경
 
 def mask_jumin(jumin):
     if not jumin or len(str(jumin)) < 8: return jumin
     return str(jumin)[:8] + "******"
 
-# --- [3. 좌측 사이드바 메뉴] ---
+# --- [4. 좌측 사이드바 메뉴] ---
 with st.sidebar:
     st.header("📋 관리 메뉴")
-    menu_options = ["고객조회 및 수정", "고객 신규등록", "보유계약 리스트 입력", "CSV DB 일괄 업로드"]
-    current_idx = menu_options.index(st.session_state.menu)
+    menu_options = ["메인 대시보드", "고객조회 및 수정", "고객 신규등록", "보유계약 리스트 입력", "CSV DB 일괄 업로드"]
+    current_idx = menu_options.index(st.session_state.menu) if st.session_state.menu in menu_options else 0
     st.session_state.menu = st.radio("메뉴 이동", menu_options, index=current_idx)
 
-# --- [4. 메뉴별 기능 구현] ---
+# --- [5. 메뉴별 기능 구현] ---
 
-if st.session_state.menu == "고객조회 및 수정":
+# (0) 메인 대시보드 (신규 추가)
+if st.session_state.menu == "메인 대시보드":
+    st.title("📊 배현우 FC 메인 대시보드")
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # 데이터 추출 로직
+    upcoming_bdays = []
+    upcoming_auto = []
+    
+    for _, row in db_cust.iterrows():
+        # 1. 생일 도래 고객 추출 (주민번호 앞 6자리 기준, 30일 이내)
+        jumin = str(row.get('주민번호', '')).strip()
+        if len(jumin) >= 6 and jumin[:6].isdigit():
+            mmdd = jumin[2:6]
+            try:
+                bday_this_year = datetime(today.year, int(mmdd[:2]), int(mmdd[2:]))
+                if bday_this_year < today:
+                    bday_this_year = datetime(today.year + 1, int(mmdd[:2]), int(mmdd[2:]))
+                days_left = (bday_this_year - today).days
+                if 0 <= days_left <= 30:
+                    upcoming_bdays.append({"고객명": row['이름'], "생일": f"{mmdd[:2]}월 {mmdd[2:]}일", "D-Day": f"D-{days_left}"})
+            except: pass
+            
+        # 2. 자동차보험 만기 도래 (가입일자 + 1년 기준, 45일 이내)
+        car_date_str = str(row.get('가입일자', '')).strip().replace('.', '-').replace('/', '-')
+        car_comp = str(row.get('자동차보험회사', '')).strip()
+        if car_date_str and car_comp and car_comp != '-':
+            try:
+                m = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', car_date_str)
+                if m:
+                    y, m_val, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    exp_date = datetime(y + 1, m_val, d)
+                    days_left = (exp_date - today).days
+                    if 0 <= days_left <= 45:
+                        upcoming_auto.append({"고객명": row['이름'], "만기일": exp_date.strftime("%Y-%m-%d"), "보험사": car_comp, "D-Day": f"D-{days_left}"})
+            except: pass
+
+    # 대시보드 레이아웃
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🎂 한 달 내 생일 도래 고객")
+        if upcoming_bdays:
+            # D-Day 기준으로 오름차순 정렬
+            bday_df = pd.DataFrame(upcoming_bdays).sort_values(by="D-Day")
+            st.dataframe(bday_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("한 달 내 생일인 고객이 없습니다.")
+            
+    with col2:
+        st.subheader("🚗 자동차보험 만기 도래 (D-45)")
+        if upcoming_auto:
+            auto_df = pd.DataFrame(upcoming_auto).sort_values(by="D-Day")
+            st.dataframe(auto_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("가까운 시일 내 만기되는 자동차보험이 없습니다.")
+            
+    st.markdown("---")
+    st.subheader("📰 오늘의 실시간 보험 뉴스")
+    news_items = get_insurance_news()
+    if news_items:
+        for news in news_items:
+            st.markdown(f"- [{news['제목']}]({news['링크']})")
+    else:
+        st.write("뉴스를 불러올 수 없습니다.")
+
+# (1) 고객조회 및 수정
+elif st.session_state.menu == "고객조회 및 수정":
     st.title("🔍 고객 정보 및 보유계약 조회")
     search_name = st.text_input("조회할 고객명을 입력하세요")
     if search_name:
@@ -92,12 +180,13 @@ if st.session_state.menu == "고객조회 및 수정":
                         final_jumin = up_jumin if up_jumin.strip() else cust['주민번호']
                         updated_row = [datetime.now().strftime("%Y-%m-%d"), up_name, final_jumin, up_phone, up_addr, up_job, up_acc, up_car, up_car_comp, up_date]
                         for i, val in enumerate(updated_row): sheet1.update_cell(target_res.index[0] + 2, i + 1, val)
-                        st.success("변경 정보가 저장되었습니다."); st.session_state[f"edit_{search_name}"] = False; st.rerun()
+                        st.session_state[f"edit_{search_name}"] = False; st.rerun()
                 if st.button("취소"): st.session_state[f"edit_{search_name}"] = False; st.rerun()
         else:
             st.error(f"'{search_name}'님은 미등록 고객입니다.")
             if st.button("➕ 신규 등록하러 가기"): st.session_state.temp_name = search_name; st.session_state.menu = "고객 신규등록"; st.rerun()
 
+# (2) 고객 신규등록
 elif st.session_state.menu == "고객 신규등록":
     st.title("➕ 신규 고객 등록")
     pre_name = st.session_state.get("temp_name", "")
@@ -111,9 +200,10 @@ elif st.session_state.menu == "고객 신규등록":
         if st.form_submit_button("✅ 고객 등록"):
             if r_name:
                 sheet1.append_row([datetime.now().strftime("%Y-%m-%d"), r_name, r_jumin, r_phone, r_addr, r_job, r_acc, r_car, r_car_comp, r_date.strftime("%Y-%m-%d")])
-                st.success("신규 고객이 등록되었습니다."); st.session_state.temp_name = ""; st.session_state.menu = "고객조회 및 수정"; st.rerun()
+                st.session_state.temp_name = ""; st.session_state.menu = "고객조회 및 수정"; st.rerun()
             else: st.warning("이름은 필수입니다.")
 
+# (3) 보유계약 리스트 입력
 elif st.session_state.menu == "보유계약 리스트 입력":
     st.title("📄 보유계약 리스트 입력")
     selected_cust = st.selectbox("고객 선택", ["선택"] + db_cust['이름'].unique().tolist() if not db_cust.empty else ["등록된 고객 없음"])
@@ -126,54 +216,39 @@ elif st.session_state.menu == "보유계약 리스트 입력":
                 sheet2.append_row([c_name, c_date, c_comp, c_prod, c_price, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
                 st.success("✅ '보장분석시트'에 기록되었습니다!")
 
-# (4) CSV DB 일괄 업로드 (스마트 업데이트 추가)
+# (4) CSV DB 일괄 업로드
 elif st.session_state.menu == "CSV DB 일괄 업로드":
     st.title("📂 기존 고객 DB 스마트 업로드 (CSV)")
-    st.info("중복 고객은 제외되며, 기존 정보 중 비어있는 칸만 새로운 데이터로 채워집니다.")
-    
     upload_file = st.file_uploader("CSV 파일 선택", type=['csv'])
-    
     if upload_file:
         try:
             df = pd.read_csv(upload_file).fillna("")
             st.write("📊 업로드된 데이터 미리보기 (상위 5개)")
             st.dataframe(df.head())
-            
             st.markdown("---")
             st.subheader("🔗 데이터 항목 매칭")
             csv_cols = ["선택 안 함"] + list(df.columns)
-            
             cols = st.columns(3)
             mapping = {}
             target_headers = ["이름", "주민번호", "연락처", "주소", "직업", "계좌번호", "차량번호", "자동차보험회사", "가입일자"]
-            
             for i, header in enumerate(target_headers):
                 with cols[i % 3]:
                     default_idx = 0
-                    if header in csv_cols:
-                        default_idx = csv_cols.index(header)
-                    # 유의어 매칭 처리
+                    if header in csv_cols: default_idx = csv_cols.index(header)
                     elif header == "연락처":
                         for syn in ["전화번호", "핸드폰", "휴대폰", "연락처"]:
-                            if syn in csv_cols:
-                                default_idx = csv_cols.index(syn)
-                                break
+                            if syn in csv_cols: default_idx = csv_cols.index(syn); break
                     elif header == "주소":
                         if "집주소" in csv_cols: default_idx = csv_cols.index("집주소")
-                    
                     mapping[header] = st.selectbox(f"➡️ {header}", csv_cols, index=default_idx)
-            
             if st.button("🚀 데이터 스마트 병합 전송"):
                 with st.spinner("중복 확인 및 데이터를 병합하는 중입니다..."):
                     new_upload_data = []
                     update_count = 0
                     today_str = datetime.now().strftime("%Y-%m-%d")
-                    
                     for _, row in df.iterrows():
                         name_val = str(row[mapping["이름"]]).strip() if mapping["이름"] != "선택 안 함" else ""
                         if not name_val: continue
-                        
-                        # CSV에서 가져온 데이터 정리
                         in_data = {
                             "주민번호": str(row[mapping["주민번호"]]).strip() if mapping["주민번호"] != "선택 안 함" else "",
                             "연락처": str(row[mapping["연락처"]]).strip() if mapping["연락처"] != "선택 안 함" else "",
@@ -184,52 +259,23 @@ elif st.session_state.menu == "CSV DB 일괄 업로드":
                             "자동차보험회사": str(row[mapping["자동차보험회사"]]).strip() if mapping["자동차보험회사"] != "선택 안 함" else "",
                             "가입일자": str(row[mapping["가입일자"]]).strip() if mapping["가입일자"] != "선택 안 함" else ""
                         }
-                        
-                        # 기존 DB에 이름이 있는지 확인
                         existing = db_cust[db_cust['이름'] == name_val]
-                        
                         if not existing.empty:
-                            # 기존 고객이 있을 경우 비어있는 칸만 업데이트
                             idx = existing.index[0]
                             sheet_row_idx = idx + 2
                             existing_data = existing.iloc[0]
-                            
-                            col_index_map = {
-                                "주민번호": 3, "연락처": 4, "주소": 5, "직업": 6, 
-                                "계좌번호": 7, "차량번호": 8, "자동차보험회사": 9, "가입일자": 10
-                            }
-                            
+                            col_index_map = {"주민번호": 3, "연락처": 4, "주소": 5, "직업": 6, "계좌번호": 7, "차량번호": 8, "자동차보험회사": 9, "가입일자": 10}
                             updates_made = False
                             for key, col_num in col_index_map.items():
                                 curr_val = existing_data.get(key, "").strip()
                                 new_val = in_data[key]
-                                
-                                # 기존 데이터가 비어있거나 '-' 인데, 새로운 데이터가 존재할 경우
                                 if curr_val in ["", "-"] and new_val:
                                     sheet1.update_cell(sheet_row_idx, col_num, new_val)
                                     updates_made = True
-                                    
-                            if updates_made:
-                                update_count += 1
+                            if updates_made: update_count += 1
                         else:
-                            # 완전히 새로운 고객인 경우
-                            new_upload_data.append([
-                                today_str, 
-                                name_val, 
-                                in_data["주민번호"], 
-                                in_data["연락처"], 
-                                in_data["주소"], 
-                                in_data["직업"], 
-                                in_data["계좌번호"], 
-                                in_data["차량번호"], 
-                                in_data["자동차보험회사"], 
-                                in_data["가입일자"]
-                            ])
-                    
-                    if new_upload_data:
-                        sheet1.append_rows(new_upload_data)
-                        
+                            new_upload_data.append([today_str, name_val, in_data["주민번호"], in_data["연락처"], in_data["주소"], in_data["직업"], in_data["계좌번호"], in_data["차량번호"], in_data["자동차보험회사"], in_data["가입일자"]])
+                    if new_upload_data: sheet1.append_rows(new_upload_data)
                     st.success(f"📊 작업 내역: 신규 고객 {len(new_upload_data)}명 등록, 기존 고객 {update_count}명 정보 보완.")
-                    st.balloons()
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
