@@ -6,7 +6,7 @@ import re
 import pdfplumber
 from datetime import datetime
 
-# --- [1. 구글 시트 연결 설정] ---
+# --- [1. 구글 시트 연결] ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
@@ -15,91 +15,110 @@ def get_gsheet(index=0):
         creds_info = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
         client = gspread.authorize(creds)
-        return client.open_by_key(SHEET_ID).worksheets()[index]
-    except:
+        # 시트 인덱스 오류 방지
+        all_sheets = client.open_by_key(SHEET_ID).worksheets()
+        if index < len(all_sheets):
+            return all_sheets[index]
+        else:
+            # 2번째 시트가 없으면 새로 생성
+            return client.open_by_key(SHEET_ID).add_worksheet(title="보장분석데이터", rows="100", cols="20")
+    except Exception as e:
+        st.error(f"시트 연결 오류: {e}")
         return None
 
-# --- [2. PDF 분석 함수] ---
+# --- [2. PDF 분석 함수 (추출 로직 강화)] ---
 def parse_pdf(file):
     results = []
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text: continue
-            for line in text.split('\n'):
-                date_m = re.search(r'\d{4}[.\-]\d{2}[.\-]\d{2}', line)
-                price_m = re.search(r'\d{1,3}(,\d{3})*원?', line)
+            lines = text.split('\n')
+            for line in lines:
+                # 날짜 (0000.00.00 / 0000-00-00 / 00000000)
+                date_m = re.search(r'(\d{4}[.\-]\d{2}[.\-]\d{2})|(\d{8})', line)
+                # 금액 (숫자 + , + 원/만/억)
+                price_m = re.search(r'(\d{1,3}(,\d{3})*원?)|(\d+만?원)', line)
+                
                 if date_m and price_m:
+                    dt = date_m.group()
+                    pr = price_m.group()
                     parts = line.split()
-                    comp = parts[0]
-                    dt, pr = date_m.group(), price_m.group()
+                    comp = parts[0] if parts else "미확인"
+                    # 회사, 날짜, 금액 제외한 나머지를 상품명으로
                     prod = line.replace(comp, "").replace(dt, "").replace(pr, "").strip()
-                    results.append([dt, comp, prod, pr]) # 가입날짜, 보험사, 상품명, 금액 순
+                    results.append([dt, comp, prod, pr])
     return results
 
-# --- [3. 초기 세팅] ---
-st.set_page_config(page_title="고객 보장분석 시스템", layout="wide")
-sheet_cust = get_gsheet(0)  # 1번째 시트: 고객정보
-sheet_analysis = get_gsheet(1) # 2번째 시트: 보장분석데이터
+# --- [3. 메인 로직] ---
+st.set_page_config(page_title="FC 보장분석 시스템 v33.0", layout="wide")
 
-# 데이터 불러오기
+sheet_cust = get_gsheet(0)
+sheet_analysis = get_gsheet(1)
+
+# 데이터 로드
 if sheet_cust and sheet_analysis:
-    cust_raw = sheet_cust.get_all_values()
-    db_cust = pd.DataFrame(cust_raw[1:], columns=cust_raw[0]) if len(cust_raw) > 1 else pd.DataFrame()
+    c_raw = sheet_cust.get_all_values()
+    db_cust = pd.DataFrame(c_raw[1:], columns=c_raw[0]) if len(c_raw) > 1 else pd.DataFrame()
     
-    analysis_raw = sheet_analysis.get_all_values()
-    db_analysis = pd.DataFrame(analysis_raw[1:], columns=analysis_raw[0]) if len(analysis_raw) > 1 else pd.DataFrame(columns=["가입날짜", "보험회사", "상품명", "금액", "고객명"])
+    a_raw = sheet_analysis.get_all_values()
+    # 2번째 시트 헤더가 없으면 자동 생성
+    if not a_raw:
+        sheet_analysis.append_row(["가입날짜", "보험회사", "상품명", "금액", "고객명"])
+        db_analysis = pd.DataFrame(columns=["가입날짜", "보험회사", "상품명", "금액", "고객명"])
+    else:
+        db_analysis = pd.DataFrame(a_raw[1:], columns=a_raw[0])
 else:
-    st.error("시트 연결에 실패했습니다.")
+    st.error("구글 시트 로드 실패. Secrets 설정을 확인하세요.")
     st.stop()
 
-# --- [4. 사이드바 메뉴] ---
-with st.sidebar:
-    st.header("📋 메뉴")
-    menu = st.radio("이동할 메뉴 선택", ["👤 고객정보 및 내역조회", "📄 보장분석 파일업로드"])
+# --- [4. UI 구성] ---
+menu = st.sidebar.radio("메뉴", ["👤 고객조회", "📄 PDF 업로드"])
 
-# --- [5. 메인 화면 로직] ---
+if menu == "📄 PDF 업로드":
+    st.title("📄 보장분석 데이터 전송")
+    target = st.selectbox("고객 선택", ["선택"] + db_cust['이름'].unique().tolist() if not db_cust.empty else ["고객 없음"])
+    upf = st.file_uploader("PDF 파일 선택", type="pdf")
 
-# (1) 고객정보 및 내역조회
-if menu == "👤 고객정보 및 내역조회":
-    st.title("👤 고객 상세 정보 조회")
-    search_name = st.text_input("고객 이름을 입력하세요")
-    
-    if search_name:
-        cust_info = db_cust[db_cust['이름'] == search_name]
-        if not cust_info.empty:
-            st.subheader(f"✅ {search_name} 고객님 기본 정보")
-            st.table(cust_info)
-            
-            st.markdown("---")
-            st.subheader(f"📑 {search_name} 고객님 보험 가입 리스트")
-            # 2번째 시트 데이터에서 해당 고객 이름으로 필터링
-            personal_list = db_analysis[db_analysis['고객명'] == search_name]
-            
-            if not personal_list.empty:
-                st.dataframe(personal_list[["가입날짜", "보험회사", "상품명", "금액"]], use_container_width=True)
-            else:
-                st.info("등록된 보험 내역이 없습니다. PDF를 업로드해 주세요.")
-        else:
-            st.warning("등록되지 않은 고객입니다.")
-
-# (2) 보장분석 파일업로드
-elif menu == "📄 보장분석 파일업로드":
-    st.title("📄 PDF 보장분석 데이터 입력")
-    target_user = st.selectbox("데이터를 입력할 고객 선택", ["선택"] + db_cust['이름'].unique().tolist())
-    pdf_file = st.file_uploader("보장분석 PDF 업로드", type="pdf")
-    
-    if pdf_file and target_user != "선택":
-        if st.button("🚀 분석 데이터 시트 저장"):
-            with st.spinner("데이터 분석 중..."):
-                extracted_items = parse_pdf(pdf_file)
-                if extracted_items:
-                    # 2번째 시트(보장분석시트)에 각 행별로 추가 (마지막 열에 고객명 추가)
-                    for item in extracted_items:
-                        item.append(target_user) # [날짜, 회사, 상품, 금액, 고객명]
-                        sheet_analysis.append_row(item)
-                    
-                    st.success(f"✅ {target_user}님의 데이터 {len(extracted_items)}건이 2번째 시트에 저장되었습니다!")
+    if upf and target != "선택":
+        if st.button("🚀 데이터 분석 및 시트 전송"):
+            items = parse_pdf(upf)
+            if items:
+                # 전송 데이터 생성
+                final_rows = []
+                for item in items:
+                    item.append(target) # 고객명 추가
+                    final_rows.append(item)
+                
+                try:
+                    # 행 한꺼번에 추가 (속도 향상 및 오류 방지)
+                    sheet_analysis.append_rows(final_rows)
+                    st.success(f"✅ {len(items)}건의 데이터가 '보장분석데이터' 시트에 성공적으로 전송되었습니다.")
                     st.balloons()
+                except Exception as e:
+                    st.error(f"시트 전송 중 오류 발생: {e}")
+            else:
+                st.error("❌ PDF에서 날짜와 금액 정보를 찾지 못했습니다. 파일 내용을 확인해주세요.")
+
+elif menu == "👤 고객조회":
+    st.title("🔍 고객별 보험 내역 조회")
+    search = st.text_input("고객명 입력")
+    if search:
+        # 고객 기본 정보
+        c_info = db_cust[db_cust['이름'] == search]
+        if not c_info.empty:
+            st.subheader(f"👤 {search} 고객 정보")
+            st.table(c_info)
+            
+            # 2번째 시트에서 내역 필터링
+            st.markdown("---")
+            st.subheader("📊 가입 보험 상세 내역")
+            # 고객명 열이 존재하는지 확인 후 필터링
+            if '고객명' in db_analysis.columns:
+                p_list = db_analysis[db_analysis['고객명'] == search]
+                if not p_list.empty:
+                    st.dataframe(p_list[["가입날짜", "보험회사", "상품명", "금액"]], use_container_width=True)
                 else:
-                    st.error("PDF에서 데이터를 추출하지 못했습니다.")
+                    st.info("등록된 내역이 없습니다.")
+            else:
+                st.error("2번째 시트에 '고객명' 컬럼이 없습니다.")
