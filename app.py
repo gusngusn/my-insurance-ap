@@ -4,6 +4,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import re
 import pdfplumber
+from datetime import datetime  # <-- 에러의 원인이었던 이 부분을 확실히 추가했습니다.
 
 # --- [1. 구글 시트 연결 설정] ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
@@ -49,10 +50,10 @@ else:
     st.error("시트에 연결할 수 없습니다.")
     st.stop()
 
-# --- [4. 좌측 사이드바 버튼 (2개 유지)] ---
+# --- [4. 좌측 사이드바 버튼] ---
 with st.sidebar:
     st.header("메뉴")
-    if st.button("👤 고객정보 관리", use_container_width=True):
+    if st.button("👥 고객정보 관리", use_container_width=True):
         st.session_state.menu = "customer_info"
     if st.button("📄 보장분석 업로드", use_container_width=True):
         st.session_state.menu = "insurance_analysis"
@@ -81,6 +82,7 @@ if "menu" in st.session_state and st.session_state.menu == "customer_info":
                 new_job = st.text_input("직업")
                 if st.form_submit_button("등록하기"):
                     if new_name and new_jumin:
+                        # 등록일 포함하여 데이터 추가
                         sheet.append_row([datetime.now().strftime("%Y-%m-%d"), new_name, new_jumin, new_phone, new_addr, new_job])
                         st.success(f"{new_name} 고객님이 등록되었습니다."); st.rerun()
 
@@ -108,4 +110,4 @@ elif "menu" in st.session_state and st.session_state.menu == "insurance_analysis
 
 else:
     st.title("🛡️ 배현우 FC 관리 시스템")
-    st.write("좌측 메뉴에서 작업을 선택해 주세요.")
+    st.info("좌측 메뉴에서 [고객정보 관리] 또는 [보장분석 업로드]를 선택해 주세요.")
