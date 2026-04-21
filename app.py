@@ -12,7 +12,7 @@ def check_password():
     """로그인 성공 시 True를 반환합니다."""
     def password_entered():
         # 현우님! 여기서 아이디(admin)와 비밀번호(1234)를 원하는 대로 수정하세요.
-        if st.session_state["username"] == "admin" and st.session_state["password"] == "1234":
+        if st.session_state["username"] == "gusngusn" and st.session_state["akqthtk1**"] == "1234":
             st.session_state["password_correct"] = True
             del st.session_state["password"]  # 보안을 위해 입력한 비번은 즉시 삭제
             del st.session_state["username"]
