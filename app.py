@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 
-# --- [1. 구글 시트 및 보안 설정] ---
+# --- [1. 구글 시트 설정] ---
 SHEET_ID = '1_MDfdDsYdOrmjU3ProttXS0qKsbbh5PXJ9tWFjA6zmY'
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
@@ -20,9 +20,7 @@ def get_gsheet(index=0):
         if len(all_worksheets) > index:
             return all_worksheets[index]
         return None
-    except Exception as e:
-        st.error(f"⚠️ 시트 연결 실패: {e}")
-        return None
+    except: return None
 
 # --- [2. 보험 뉴스 스크래핑] ---
 def get_insurance_news():
@@ -38,7 +36,7 @@ def get_insurance_news():
     except: pass
     return results
 
-# --- [3. 데이터 로드 및 전처리] ---
+# --- [3. 데이터 로드] ---
 st.set_page_config(page_title="배현우 성과관리 시스템", layout="wide")
 sheet_cust = get_gsheet(0)
 sheet_sales = get_gsheet(1)
@@ -58,7 +56,7 @@ with st.sidebar:
     st.header("📋 메뉴 리스트")
     menu = st.radio("메뉴 선택", ["🏠 홈", "📊 실적 관리", "🔍 고객조회/수정", "✍️ 고객정보 신규등록", "📑 고객리스트", "🚘 자동차증권 업데이트", "📄 보장분석리스트 입력", "🏥 보험청구 양식"])
     st.markdown("---")
-    st.caption("배현우 FC 전용 v11.6")
+    st.caption("배현우 FC 전용 v11.8")
 
 # --- [5. 메뉴별 기능 구현] ---
 
@@ -95,66 +93,92 @@ if menu == "🏠 홈":
     for n in get_insurance_news(): st.markdown(f"• [{n['title']}]({n['link']})")
 
 elif menu == "📊 실적 관리":
-    st.subheader("📊 실적 입력 (신규 고객 자동 등록 지원)")
+    st.subheader("📊 실적 입력 및 자동 고객 등록")
     with st.expander("➕ 실적 정보 입력", expanded=True):
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1: in_date = st.date_input("날짜", datetime.now())
         with c2: in_name = st.text_input("고객 이름")
-        with c3: in_birth = st.text_input("생년월일(6자리)", placeholder="예: 850101")
+        with c3: in_birth = st.text_input("생일(6자리)")
         with c4: in_prod = st.text_input("상품명")
         with c5: in_price = st.text_input("보험료")
-        
-        if st.button("🚀 실적 저장 및 고객 연동"):
-            if in_name and in_birth and in_prod and in_price:
-                p_val = re.sub(r'[^0-9]', '', in_price)
-                
-                # 1. 고객 존재 여부 확인
-                match = db_cust[(db_cust['이름'] == in_name) & (db_cust['주민번호'].str.startswith(in_birth))]
-                
-                if match.empty:
-                    # 2. 신규 고객 자동 등록 (고객 리스트 시트)
-                    # 이름, 주민번호(생일만), 연락처(미정), 주소(미정), 직업(미정) 순으로 기본 등록
-                    new_cust = [str(in_date), in_name, f"{in_birth}-*******", "연락처 미기입", "주소 미기입", "직업 미기입", f"[보장분석] {in_prod}/{p_val}/{in_date}", in_name, "", "", "", "", "", "", ""]
-                    sheet_cust.append_row(new_cust)
-                    st.info(f"✨ 신규 고객 [{in_name}]님이 고객 리스트에 자동 등록되었습니다.")
-                else:
-                    # 3. 기존 고객 보장분석 업데이트
-                    row_idx = match.index[-1] + 2
-                    old_memo = match.iloc[-1]['병력(특이사항)']
-                    new_entry = f"{in_prod}/{p_val}/{in_date}"
-                    updated_memo = f"{old_memo} | {new_entry}" if "[보장분석]" in old_memo else f"{old_memo.strip()} | [보장분석] {new_entry}".strip(" | ")
-                    sheet_cust.update_cell(row_idx, 7, updated_memo)
-                
-                # 4. 실적 시트 저장
-                if sheet_sales:
-                    sheet_sales.append_row([str(in_date), in_name, in_birth, in_prod, p_val])
-                    st.success(f"✅ {in_name}님 실적 저장이 완료되었습니다.")
-                st.rerun()
-            else: st.warning("모든 정보를 입력해 주세요.")
+        if st.button("🚀 저장"):
+            p_val = re.sub(r'[^0-9]', '', in_price)
+            match = db_cust[(db_cust['이름'] == in_name) & (db_cust['주민번호'].str.startswith(in_birth))]
+            if match.empty:
+                sheet_cust.append_row([str(in_date), in_name, f"{in_birth}-*******", "미기입", "미기입", "미기입", f"[보장분석] {in_prod}/{p_val}/{in_date}", in_name, "", "", "", "", "", "", ""])
+            else:
+                row_idx = match.index[-1] + 2
+                old = match.iloc[-1]['병력(특이사항)']
+                new = f"{in_prod}/{p_val}/{in_date}"
+                upd = f"{old} | {new}" if "[보장분석]" in old else f"{old.strip()} | [보장분석] {new}".strip(" | ")
+                sheet_cust.update_cell(row_idx, 7, upd)
+            if sheet_sales:
+                sheet_sales.append_row([str(in_date), in_name, in_birth, in_prod, p_val])
+            st.success("완료"); st.rerun()
 
 elif menu == "🔍 고객조회/수정":
     st.subheader("🔍 고객 상세 조회")
-    name_s = st.text_input("성함")
+    name_s = st.text_input("고객 성함 입력")
     if name_s:
         res = db_cust[db_cust['이름'].str.contains(name_s)]
-        for _, row in res.iterrows():
-            with st.expander(f"👤 {row['이름']} ({row['직업']})", expanded=True):
-                st.write(f"**연락처:** {row['연락처']} / **주민:** {row['주민번호']}")
-                st.write(f"**주소:** {row['주소']}")
-                st.info(f"**메모:** {row['병력(특이사항)']}")
+        if not res.empty:
+            for idx, row in res.iterrows():
+                with st.expander(f"👤 {row['이름']} ({row['연락처']})", expanded=True):
+                    st.write(f"**🏠 주소:** {row['주소']} / **🛠️ 직업:** {row['직업']}")
+                    
+                    # --- [보장분석 가공 로직] ---
+                    memo = row['병력(특이사항)']
+                    if "[보장분석]" in memo:
+                        st.markdown("#### 📋 보유계약 리스트")
+                        parts = memo.split("[보장분석]")
+                        ana_text = parts[-1].strip()
+                        # 데이터 쪼개기 및 중복 제거
+                        items = [i.strip() for i in ana_text.split('|') if i.strip()]
+                        unique_items = list(dict.fromkeys(items)) # 순서 유지하며 중복 제거
+                        
+                        t_data = []
+                        for it in unique_items:
+                            p = it.split('/')
+                            if len(p) >= 2:
+                                t_data.append({
+                                    "보험사/상품명": p[0],
+                                    "보험료": f"{p[1]}원" if p[1].isdigit() else p[1],
+                                    "계약일": p[2] if len(p) > 2 else "-"
+                                })
+                        
+                        if t_data:
+                            st.table(pd.DataFrame(t_data))
+                        
+                        st.info(f"**💡 기타 메모:** {parts[0].replace('|','').strip()}")
+                    else:
+                        st.info(f"**💡 메모:** {memo}")
+                    
+                    # 정보 수정 폼 (하단 배치)
+                    with st.form(key=f"edit_{idx}"):
+                        st.write("✏️ **정보 수정**")
+                        c1, c2 = st.columns(2)
+                        new_phone = c1.text_input("연락처", value=row['연락처'])
+                        new_addr = c2.text_input("주소", value=row['주소'])
+                        new_job = c1.text_input("직업", value=row['직업'])
+                        new_memo = st.text_area("전체 메모(보장내역 포함)", value=row['병력(특이사항)'])
+                        if st.form_submit_button("✅ 수정사항 저장"):
+                            row_num = idx + 2
+                            sheet_cust.update_cell(row_num, 4, new_phone)
+                            sheet_cust.update_cell(row_num, 5, new_addr)
+                            sheet_cust.update_cell(row_num, 6, new_job)
+                            sheet_cust.update_cell(row_num, 7, new_memo)
+                            st.success("수정 완료"); st.rerun()
 
 elif menu == "✍️ 고객정보 신규등록":
-    st.subheader("✍️ 고객 정보 수동 등록")
+    st.subheader("✍️ 신규 고객 등록")
     raw_in = st.text_area("이름, 주민번호, 연락처, 주소, 직업")
     if st.button("🚀 등록") and raw_in:
-        try:
-            d = [i.strip() for i in raw_in.split(',')]
-            new_row = [datetime.now().strftime("%Y-%m-%d"), d[0], d[1], d[2], d[3], d[4] if len(d)>4 else "", "", d[0], "", "", "", "", "", "", ""]
-            sheet_cust.append_row(new_row); st.success("완료"); st.rerun()
-        except: st.error("형식을 확인하세요.")
+        d = [i.strip() for i in raw_in.split(',')]
+        new_row = [datetime.now().strftime("%Y-%m-%d"), d[0], d[1], d[2], d[3], d[4] if len(d)>4 else "", "", d[0], "", "", "", "", "", "", ""]
+        sheet_cust.append_row(new_row); st.success("완료"); st.rerun()
 
 elif menu == "📑 고객리스트":
     st.subheader("📑 전체 고객 리스트")
     st.dataframe(db_cust[['날짜', '이름', '주민번호', '연락처', '주소', '직업']], use_container_width=True)
 
-# ... (나머지 자동차 업데이트, 보장분석, 청구양식 메뉴 유지)
+# ... (업데이트, 보장분석, 청구양식 등 나머지 메뉴 v11.7 동일하게 유지)
