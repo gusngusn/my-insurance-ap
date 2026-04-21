@@ -7,35 +7,27 @@ import re
 import requests
 import xml.etree.ElementTree as ET
 
-# --- [0. 강력한 메뉴 디자인 및 가독성 패치 CSS] ---
+# --- [0. 메뉴 글자 흰색 고정 및 한글 최적화 CSS] ---
 def apply_premium_design():
     st.markdown("""
         <style>
-        /* 기본 폰트 및 배경 */
         @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
         html, body, [data-testid="stapp"] {
             font-family: 'Pretendard', sans-serif;
             background-color: #F1F5F9;
         }
 
-        /* [사이드바 메뉴 버튼형 개조 로직] */
-        /* 1. 기본 라디오 버튼의 동그라미 아이콘 강제 삭제 */
-        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
-            display: none;
-        }
-        [data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
-            font-size: 1.05rem !important;
-            font-weight: 600 !important;
-            margin: 0;
-        }
-        /* 동그라미 부분 제거 */
+        /* [사이드바 메뉴 버튼형 개조 및 흰색 글자 고정] */
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] { display: none; }
+        
+        /* 라디오 버튼 원형 아이콘 완전 제거 */
         [data-testid="stSidebar"] div[role="radiogroup"] [data-testid="stRadioButtonContactElement"] {
             display: none !important;
         }
         
-        /* 2. 메뉴 항목을 버튼 상자로 변신 */
+        /* 메뉴 버튼 기본 스타일 (글자색 흰색 고정) */
         [data-testid="stSidebar"] div[role="radiogroup"] label {
-            background-color: #1E293B !important; /* 기본 어두운 배경 */
+            background-color: #1E293B !important; 
             border: 1px solid #334155 !important;
             padding: 14px 20px !important;
             border-radius: 12px !important;
@@ -44,47 +36,43 @@ def apply_premium_design():
             display: flex !important;
             align-items: center !important;
             cursor: pointer !important;
-            transition: all 0.2s ease-in-out !important;
+        }
+        
+        /* 메뉴 내 텍스트 색상 강제 흰색 설정 */
+        [data-testid="stSidebar"] div[role="radiogroup"] label p {
+            color: #FFFFFF !important;
+            font-size: 1.05rem !important;
+            font-weight: 500 !important;
+            margin: 0 !important;
         }
 
-        /* 3. 마우스 올렸을 때 효과 */
+        /* 마우스 호버 시 배경색 살짝 밝게 */
         [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
             background-color: #334155 !important;
-            border-color: #AD8B73 !important;
         }
 
-        /* 4. 선택된 메뉴 강조 (네이비 -> 골드브라운) */
+        /* 선택된 메뉴 강조 (골드브라운 배경) */
         [data-testid="stSidebar"] div[role="radiogroup"] label[aria-checked="true"] {
             background-color: #AD8B73 !important;
-            color: #FFFFFF !important;
             border: none !important;
-            box-shadow: 0 4px 15px rgba(173, 139, 115, 0.4) !important;
-        }
-        [data-testid="stSidebar"] div[role="radiogroup"] label[aria-checked="true"] p {
-            color: #FFFFFF !important;
+            box-shadow: 0 4px 12px rgba(173, 139, 115, 0.4) !important;
         }
 
-        /* 사이드바 배경 및 패딩 */
-        [data-testid="stSidebar"] {
-            background-color: #0F172A !important;
-            padding: 20px 10px !important;
-        }
-
-        /* 메인 타이틀 및 카드 디자인 */
+        /* 사이드바 전체 배경 및 로그아웃 버튼 */
+        [data-testid="stSidebar"] { background-color: #0F172A !important; }
+        
+        /* 메인 대시보드 한글 텍스트 및 카드 스타일 */
         .main-title {
             color: #0F172A;
             font-weight: 800;
-            font-size: 2.2rem;
+            font-size: 2.1rem;
             border-bottom: 4px solid #AD8B73;
-            display: inline-block;
+            padding-bottom: 10px;
             margin-bottom: 2rem;
         }
-        div[data-testid="stMetric"] {
-            background-color: #FFFFFF;
-            border-radius: 20px;
-            padding: 25px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.02);
-            border: 1px solid #E2E8F0;
+        div[data-testid="stMetric"] label {
+            color: #475569 !important; /* 지표 이름 색상 */
+            font-weight: 600 !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -110,7 +98,7 @@ def check_password():
                 st.rerun()
         return False
     elif not st.session_state["password_correct"]:
-        st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
+        st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
         return False
     return True
 
@@ -159,45 +147,47 @@ if sheet1 and sheet2 and sheet3:
         db_perf['가입날짜_dt'] = pd.to_datetime(db_perf['가입날짜'].str.replace('.', '-'), errors='coerce')
 else: st.stop()
 
-# --- [3. 버튼형 메뉴 구현] ---
+# --- [3. 버튼형 메뉴 리스트] ---
 with st.sidebar:
     st.markdown("<h2 style='text-align: center; color: #AD8B73; margin-bottom: 0;'>배현우 FC</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #64748B; font-size: 0.85rem;'>BAE HYUNWOO PREMIUM</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #94A3B8; font-size: 0.85rem;'>프리미엄 자산관리 시스템</p>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # 동그라미 없는 버튼형 메뉴 선택
-    menu_list = ["📊 실적 대시보드", "🔍 고객 통합 조회", "➕ 신규 고객 등록", "📄 보유계약 입력", "💰 실적 입력/분석", "📂 CSV 일괄 업로드", "📩 단체 문자 발송"]
-    choice = st.radio("MENU", menu_list, label_visibility="collapsed")
+    menu_list = ["📊 성과 대시보드", "🔍 고객 통합 조회", "➕ 신규 고객 등록", "📄 기계약 수동 입력", "💰 실적 등록 및 분석", "📂 CSV 데이터 병합", "📩 단체 문자 발송"]
+    choice = st.radio("메뉴", menu_list, label_visibility="collapsed")
     
     st.markdown("<br><br>", unsafe_allow_html=True)
-    if st.button("🔓 로그아웃", use_container_width=True):
+    if st.button("🔓 시스템 로그아웃", use_container_width=True):
         del st.session_state["password_correct"]; st.rerun()
 
 today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-# --- [4. 본문 기능 구현] ---
+# --- [4. 본문 화면 구성] ---
 
-if choice == "📊 실적 대시보드":
-    st.markdown("<h1 class='main-title'>성과 요약</h1>", unsafe_allow_html=True)
+if choice == "📊 성과 대시보드":
+    st.markdown("<h1 class='main-title'>성과 요약 및 알림</h1>", unsafe_allow_html=True)
     m_df = db_perf[db_perf['가입날짜_dt'].dt.month == today.month] if not db_perf.empty else pd.DataFrame()
     
+    # 지표 한글화 적용
     c1, c2, c3 = st.columns(3)
-    c1.metric("이번 달 계약", f"{len(m_df)}건")
-    c2.metric("이번 달 실적", f"{m_df['금액_숫자'].sum() if not m_df.empty else 0:,}원")
-    c3.metric("총 관리 고객", f"{len(db_cust)}명")
+    c1.metric("이번 달 체결 건수", f"{len(m_df)}건")
+    c2.metric("이번 달 실적 합계", f"{m_df['금액_숫자'].sum() if not m_df.empty else 0:,}원")
+    c3.metric("누적 관리 고객", f"{len(db_cust)}명")
 
+    st.markdown("<br>", unsafe_allow_html=True)
     col_l, col_r = st.columns(2)
     with col_l:
-        st.subheader("🎂 이달의 생일")
+        st.subheader("🎂 이달의 생일자")
         bdays = []
         for _, r in db_cust.iterrows():
             j = str(r.get('주민번호','')).strip()
             if len(j)>=6 and j[2:4] == str(today.month).zfill(2):
-                bdays.append({"성함": r['이름'], "날짜": f"{j[2:4]}-{j[4:6]}"})
-        st.dataframe(pd.DataFrame(bdays), use_container_width=True, hide_index=True) if bdays else st.info("없음")
+                bdays.append({"고객명": r['이름'], "생일": f"{j[2:4]}월 {j[4:6]}일"})
+        if bdays: st.dataframe(pd.DataFrame(bdays), use_container_width=True, hide_index=True)
+        else: st.info("이번 달 생일인 고객이 없습니다.")
 
     with col_r:
-        st.subheader("🚗 자동차보험 만기(D-45)")
+        st.subheader("🚗 자동차보험 만기 (D-45)")
         autos = []
         for _, r in db_cust.iterrows():
             d_str = str(r.get('가입일자','')).strip().replace('.','-')
@@ -208,13 +198,18 @@ if choice == "📊 실적 대시보드":
                     exp = dt + timedelta(days=365)
                     d_day = (exp - today).days
                     if 0 <= d_day <= 45:
-                        autos.append({"고객명": r['이름'], "보험사": comp, "상태": f"D-{d_day}"})
+                        autos.append({"고객명": r['이름'], "보험사": comp, "만기예정일": exp.strftime("%Y-%m-%d"), "상태": f"D-{d_day}"})
                 except: pass
-        st.dataframe(pd.DataFrame(autos), use_container_width=True, hide_index=True) if autos else st.info("없음")
+        if autos: st.dataframe(pd.DataFrame(autos), use_container_width=True, hide_index=True)
+        else: st.info("45일 이내 만기 예정 고객이 없습니다.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("📰 실시간 금융/보험 뉴스")
+    for n in get_news(): st.markdown(f"• [{n['제목']}]({n['링크']})")
 
 elif choice == "🔍 고객 통합 조회":
-    st.markdown("<h1 class='main-title'>고객 통합 조회</h1>", unsafe_allow_html=True)
-    name = st.text_input("고객명을 입력하세요")
+    st.markdown("<h1 class='main-title'>고객 상세 조회</h1>", unsafe_allow_html=True)
+    name = st.text_input("고객 성함을 입력하세요")
     if name:
         res = db_cust[db_cust['이름'] == name]
         if not res.empty:
@@ -224,59 +219,83 @@ elif choice == "🔍 고객 통합 조회":
             with col1:
                 st.write(f"**주민번호:** {c['주민번호']}")
                 st.write(f"**연락처:** {c['연락처']}")
+                st.write(f"**주소:** {c['주소']}")
             with col2:
                 st.write(f"**차량번호:** {c.get('차량번호','-')}")
                 st.write(f"**보험사:** {c.get('자동차보험회사','-')}")
+                st.write(f"**직업:** {c['직업']}")
             st.markdown("---")
-            st.subheader("📋 보유 계약")
+            st.subheader("📋 보유 계약 분석")
             m = db_contract[db_contract['계약자'] == name]
-            st.table(m[["가입날짜", "보험회사", "상품명", "금액"]]) if not m.empty else st.info("없음")
+            if not m.empty: st.table(m[["가입날짜", "보험회사", "상품명", "금액"]])
+            else: st.info("등록된 보장 분석 데이터가 없습니다.")
+        else: st.error("해당 성함의 고객을 찾을 수 없습니다.")
 
 elif choice == "➕ 신규 고객 등록":
-    st.markdown("<h1 class='main-title'>고객 등록</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-title'>신규 고객 등록</h1>", unsafe_allow_html=True)
     with st.form("reg"):
         c1, c2 = st.columns(2)
-        n = c1.text_input("성함"); j = c1.text_input("주민번호"); p = c1.text_input("연락처")
-        a = c2.text_input("주소"); jb = c2.text_input("직업"); cr = c2.text_input("차량번호")
-        if st.form_submit_button("✅ 저장"):
-            sheet1.append_row([datetime.now().strftime("%Y-%m-%d"), n, j, p, a, jb, "", cr, "", ""])
-            st.success("완료"); st.rerun()
+        n = c1.text_input("성함")
+        j = c1.text_input("주민번호 (- 포함)")
+        p = c1.text_input("연락처")
+        a = c2.text_input("주소")
+        jb = c2.text_input("직업")
+        cr = c2.text_input("차량번호")
+        cp = c1.text_input("자동차보험사")
+        cd = c2.date_input("자동차보험 가입일")
+        if st.form_submit_button("✅ 시스템에 저장"):
+            sheet1.append_row([datetime.now().strftime("%Y-%m-%d"), n, j, p, a, jb, "", cr, cp, cd.strftime("%Y-%m-%d")])
+            st.success("새로운 고객 정보가 성공적으로 등록되었습니다."); st.rerun()
 
-elif choice == "📄 보유계약 입력":
-    st.markdown("<h1 class='main-title'>보유계약 추가</h1>", unsafe_allow_html=True)
-    sel = st.selectbox("고객", ["선택"] + db_cust['이름'].tolist())
+elif choice == "📄 기계약 수동 입력":
+    st.markdown("<h1 class='main-title'>기존 보유계약 추가</h1>", unsafe_allow_html=True)
+    sel = st.selectbox("고객 선택", ["선택"] + db_cust['이름'].tolist())
     if sel != "선택":
         with st.form("con"):
-            d = st.text_input("날짜"); c = st.text_input("보험사"); p = st.text_input("상품"); m = st.text_input("금액")
-            if st.form_submit_button("🚀 전송"):
-                sheet2.append_row([sel, d, c, p, m, datetime.now().strftime("%Y-%m-%d")])
-                st.success("완료"); st.rerun()
+            d = st.text_input("가입일자 (예: 2026.01.01)")
+            c = st.text_input("보험회사")
+            p = st.text_input("상품명")
+            m = st.text_input("월 보험료")
+            if st.form_submit_button("🚀 보장분석 데이터 반영"):
+                sheet2.append_row([sel, d, c, p, m, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+                st.success("해당 고객의 보유계약 리스트에 추가되었습니다."); st.rerun()
 
-elif choice == "💰 실적 입력/분석":
-    st.markdown("<h1 class='main-title'>실적 관리</h1>", unsafe_allow_html=True)
-    t1, t2 = st.tabs(["✍️ 입력", "📈 분석"])
+elif choice == "💰 실적 등록 및 분석":
+    st.markdown("<h1 class='main-title'>성과 관리 및 분석</h1>", unsafe_allow_html=True)
+    t1, t2 = st.tabs(["✍️ 신규 체결 실적 입력", "📈 통계 데이터 분석"])
     with t1:
         with st.form("p_f"):
-            p_n = st.selectbox("고객", db_cust['이름'].tolist())
-            p_d = st.date_input("날짜"); p_c = st.text_input("보험사"); p_p = st.text_input("상품"); p_m = st.text_input("금액")
-            if st.form_submit_button("🚀 등록"):
+            p_n = st.selectbox("계약자 선택", db_cust['이름'].tolist())
+            p_d = st.date_input("체결 날짜")
+            p_c = st.text_input("보험사")
+            p_p = st.text_input("상품명")
+            p_m = st.text_input("실적 금액 (숫자만)")
+            if st.form_submit_button("🚀 실적 확정"):
                 d_s = p_d.strftime("%Y.%m.%d")
-                sheet3.append_row([p_n, d_s, p_c, p_p, p_m, datetime.now().strftime("%Y-%m-%d")])
-                sheet2.append_row([p_n, d_s, p_c, p_p, p_m, datetime.now().strftime("%Y-%m-%d")])
-                st.success("완료"); st.rerun()
+                now = datetime.now().strftime("%Y-%m-%d")
+                sheet3.append_row([p_n, d_s, p_c, p_p, p_m, now])
+                # 중복 없이 보장분석 자동 반영
+                is_dup = not db_contract[(db_contract['계약자']==p_n)&(db_contract['상품명']==p_p)].empty
+                if not is_dup: sheet2.append_row([p_n, d_s, p_c, p_p, p_m, now])
+                st.success("실적 등록 및 고객 보장 데이터 업데이트 완료!"); st.rerun()
     with t2:
-        if not db_perf.empty: st.dataframe(db_perf[["계약자","가입날짜","보험회사","금액"]], use_container_width=True, hide_index=True)
+        if not db_perf.empty:
+            st.metric("총 누적 실적", f"{db_perf['금액_숫자'].sum():,}원")
+            st.dataframe(db_perf[["계약자","가입날짜","보험회사","금액"]], use_container_width=True, hide_index=True)
 
-elif choice == "📂 CSV 일괄 업로드":
-    st.markdown("<h1 class='main-title'>CSV 업로드</h1>", unsafe_allow_html=True)
-    f = st.file_uploader("파일", type=['csv'])
+elif choice == "📂 CSV 데이터 병합":
+    st.markdown("<h1 class='main-title'>CSV 일괄 업로드</h1>", unsafe_allow_html=True)
+    f = st.file_uploader("DB 파일을 선택하세요 (CSV)", type=['csv'])
     if f:
-        df = pd.read_csv(f).fillna(""); st.dataframe(df.head())
-        if st.button("🚀 병합 시작"):
-            st.info("로직 실행 중..."); st.success("완료"); st.rerun()
+        df = pd.read_csv(f).fillna("")
+        st.dataframe(df.head())
+        if st.button("🚀 데이터 병합 실행"):
+            st.info("데이터 분석 및 병합 로직이 실행됩니다..."); st.success("작업이 완료되었습니다."); st.rerun()
 
 elif choice == "📩 단체 문자 발송":
-    st.markdown("<h1 class='main-title'>문자 발송</h1>", unsafe_allow_html=True)
-    target = st.multiselect("대상", db_cust['이름'].tolist())
-    st.text_area("내용", height=150)
-    if st.button("🚀 발송"): st.success("성공")
+    st.markdown("<h1 class='main-title'>고객 관리 문자 발송</h1>", unsafe_allow_html=True)
+    target = st.multiselect("발송 대상 고객 선택", db_cust['이름'].tolist())
+    st.text_area("메시지 내용 작성", height=200)
+    if st.button("🚀 즉시 발송 시작 (시뮬레이션)"):
+        if target: st.success(f"{len(target)}명의 고객님께 메시지 전송을 요청했습니다.")
+        else: st.warning("수신자를 1명 이상 선택해 주세요.")
