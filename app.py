@@ -19,7 +19,7 @@ def get_gsheet(index=0):
         return client.open_by_key(SHEET_ID).get_worksheet(index)
     except: return None
 
-# --- [뉴스 스크래핑 보강] ---
+# --- [보험매일 뉴스 스크래핑 보강] ---
 def get_insurance_news():
     results = []
     try:
@@ -38,14 +38,12 @@ def get_insurance_news():
 st.set_page_config(page_title="배현우 성과관리 시스템", layout="wide")
 
 sheet_cust = get_gsheet(0)
-sheet_sales = get_gsheet(1) # 시트의 두번째 탭: 실적리스트
+sheet_sales = get_gsheet(1)
 
-# 고객 데이터 처리
 cust_values = sheet_cust.get_all_values() if sheet_cust else []
 EXPECTED_CUST_HEADERS = ["날짜", "이름", "주민번호", "연락처", "주소", "직업", "병력(특이사항)", "가족대표", "암", "뇌", "심", "수술", "차량번호", "보험사", "자동차만기일"]
 db_cust = pd.DataFrame(cust_values[1:], columns=EXPECTED_CUST_HEADERS) if len(cust_values) > 1 else pd.DataFrame(columns=EXPECTED_CUST_HEADERS)
 
-# 실적 데이터 처리
 sales_values = sheet_sales.get_all_values() if sheet_sales else []
 sales_headers = ["날짜", "고객명", "상품명", "보험료"]
 db_sales = pd.DataFrame(sales_values[1:], columns=sales_headers) if len(sales_values) > 1 else pd.DataFrame(columns=sales_headers)
@@ -56,13 +54,11 @@ with st.sidebar:
     st.header("📋 메뉴 리스트")
     menu = st.radio("메뉴 선택", ["🏠 홈", "📊 실적 관리", "🔍 고객조회/수정", "✍️ 고객정보 신규등록", "📑 고객리스트", "🚘 자동차증권 업데이트", "📄 보장분석리스트 입력", "🏥 보험청구 양식"])
     st.markdown("---")
-    st.caption("배현우 FC 전용 v8.8")
+    st.caption("배현우 FC 전용 v9.0")
 
-# --- [메뉴별 상세 구현] ---
-
+# --- [메뉴별 기능 구현] ---
 if menu == "🏠 홈":
     st.title("🛡️ 배현우 FC 성과 대시보드")
-    
     db_sales['날짜_dt'] = pd.to_datetime(db_sales['날짜'], errors='coerce')
     curr_m, curr_y = datetime.now().month, datetime.now().year
     this_m_data = db_sales[(db_sales['날짜_dt'].dt.month == curr_m) & (db_sales['날짜_dt'].dt.year == curr_y)]
@@ -177,5 +173,50 @@ elif menu == "📄 보장분석리스트 입력":
             st.success("완료"); st.rerun()
 
 elif menu == "🏥 보험청구 양식":
-    st.subheader("🏥 주요 보험사 청구 링크")
-    st.markdown("- [삼성화재](https://www.samsungfire.com/customer/claim/reward/reward_01.html)\n- [DB손보](https://www.idbins.com/FWCRRE1001.do)\n- [현대해상](https://www.hi.co.kr/service/claim/guide/form.do)")
+    st.subheader("🏥 전 보험사 보험금 청구 양식")
+    st.info("💡 링크를 클릭하면 공식 홈페이지 청구 양식 다운로드 페이지로 이동합니다.")
+    
+    # 1. 손해보험사 (가나다순)
+    st.markdown("#### [손해보험사]")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("[메리츠화재](https://www.meritzfire.com/compensation/guide/claim-guide.do)")
+        st.markdown("[한화손해보험](https://www.hwgeneralins.com/compensation/guide/form-download.do)")
+        st.markdown("[롯데손해보험](https://www.lotteins.co.kr/web/CST/CLM/GLD/cstClmGld01.jsp)")
+        st.markdown("[MG손해보험](https://www.mggeneralins.com/compensation/guide/form-download.do)")
+    with c2:
+        st.markdown("[흥국화재](https://www.heungkukfire.co.kr/main/compensation/guide/compensationGuide.do)")
+        st.markdown("[삼성화재](https://www.samsungfire.com/customer/claim/reward/reward_01.html)")
+        st.markdown("[현대해상](https://www.hi.co.kr/service/claim/guide/form.do)")
+        st.markdown("[KB손해보험](https://www.kbinsure.co.kr/CG302010001.ec)")
+    with c3:
+        st.markdown("[DB손해보험](https://www.idbins.com/FWCRRE1001.do)")
+        st.markdown("[AXA손해보험](https://www.axa.co.kr/main/compensation/common/fileDownload.do)")
+        st.markdown("[하나손해보험](https://www.hanainsure.co.kr/compensation/guide/form)")
+        st.markdown("[캐롯손해보험](https://www.carrotins.com/claim/guide/form)")
+
+    # 2. 생명보험사 (가나다순)
+    st.markdown("---")
+    st.markdown("#### [생명보험사]")
+    c4, c5, c6 = st.columns(3)
+    with c4:
+        st.markdown("[한화생명](https://www.hanwhalife.com/static/service/customer/claim/reward/reward_01.html)")
+        st.markdown("[ABL생명](https://www.abllife.co.kr/customer/claim/reward/reward_01.html)")
+        st.markdown("[삼성생명](https://www.samsunglife.com/customer/claim/reward/reward_01.html)")
+        st.markdown("[흥국생명](https://www.heungkuklife.co.kr/customer/claim/reward/reward_01.html)")
+        st.markdown("[교보생명](https://www.kyobo.com/webdoc/customer/claim/reward/reward_01.html)")
+        st.markdown("[DGB생명](https://www.dgblife.co.kr/customer/claim/reward/reward_01.html)")
+    with c5:
+        st.markdown("[KDB생명](https://www.kdblife.co.kr/customer/claim/reward/reward_01.html)")
+        st.markdown("[DB생명](https://www.idblife.com/customer/claim/reward/reward_01.html)")
+        st.markdown("[동양생명](https://www.myangel.co.kr/customer/claim/reward/reward_01.html)")
+        st.markdown("[메트라이프](https://www.metlife.co.kr/customer-service/claim/guide/)")
+        st.markdown("[라이나생명](https://www.lina.co.kr/customer/claim/reward/reward_01.html)")
+        st.markdown("[AIA생명](https://www.aia.co.kr/ko/customer-service/claim/guide.html)")
+    with c6:
+        st.markdown("[푸본현대생명](https://www.fubonhyundai.com/customer/claim/reward/reward_01.html)")
+        st.markdown("[신한라이프](https://www.shinhanlife.co.kr/hp/cd/cd010101.do)")
+        st.markdown("[미래에셋생명](https://life.miraeasset.com/customer/claim/reward/reward_01.html)")
+        st.markdown("[교보라이프플래닛](https://www.lifeplanet.co.kr/customer/claim/guide.dev)")
+        st.markdown("[아이엠라이프](https://www.imlife.co.kr/customer/claim/reward/reward_01.html)")
+        st.markdown("[우체국보험](https://www.epostbank.go.kr/claim/reward/reward_01.html)")
