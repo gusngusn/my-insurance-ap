@@ -19,7 +19,7 @@ def get_gsheets():
         return None, None
 
 # --- [2. 데이터 로드 및 초기화] ---
-st.set_page_config(page_title="배현우 FC 시스템 v50.0", layout="wide")
+st.set_page_config(page_title="배현우 FC 시스템 v51.0", layout="wide")
 sheet1, sheet2 = get_gsheets()
 
 h1 = ["등록일자", "이름", "주민번호", "연락처", "주소", "직업", "계좌번호", "차량번호", "자동차보험회사", "가입일자"]
@@ -49,7 +49,6 @@ with st.sidebar:
 
 # --- [4. 메뉴별 기능 구현] ---
 
-# (1) 고객조회 및 수정
 if st.session_state.menu == "고객조회 및 수정":
     st.title("🔍 고객 정보 및 보유계약 조회")
     search_name = st.text_input("조회할 고객명을 입력하세요")
@@ -93,13 +92,12 @@ if st.session_state.menu == "고객조회 및 수정":
                         final_jumin = up_jumin if up_jumin.strip() else cust['주민번호']
                         updated_row = [datetime.now().strftime("%Y-%m-%d"), up_name, final_jumin, up_phone, up_addr, up_job, up_acc, up_car, up_car_comp, up_date]
                         for i, val in enumerate(updated_row): sheet1.update_cell(target_res.index[0] + 2, i + 1, val)
-                        st.success("변경 완료"); st.session_state[f"edit_{search_name}"] = False; st.rerun()
+                        st.success("변경 정보가 저장되었습니다."); st.session_state[f"edit_{search_name}"] = False; st.rerun()
                 if st.button("취소"): st.session_state[f"edit_{search_name}"] = False; st.rerun()
         else:
             st.error(f"'{search_name}'님은 미등록 고객입니다.")
             if st.button("➕ 신규 등록하러 가기"): st.session_state.temp_name = search_name; st.session_state.menu = "고객 신규등록"; st.rerun()
 
-# (2) 고객 신규등록
 elif st.session_state.menu == "고객 신규등록":
     st.title("➕ 신규 고객 등록")
     pre_name = st.session_state.get("temp_name", "")
@@ -113,10 +111,9 @@ elif st.session_state.menu == "고객 신규등록":
         if st.form_submit_button("✅ 고객 등록"):
             if r_name:
                 sheet1.append_row([datetime.now().strftime("%Y-%m-%d"), r_name, r_jumin, r_phone, r_addr, r_job, r_acc, r_car, r_car_comp, r_date.strftime("%Y-%m-%d")])
-                st.success("등록 완료!"); st.session_state.temp_name = ""; st.session_state.menu = "고객조회 및 수정"; st.rerun()
+                st.success("신규 고객이 등록되었습니다."); st.session_state.temp_name = ""; st.session_state.menu = "고객조회 및 수정"; st.rerun()
             else: st.warning("이름은 필수입니다.")
 
-# (3) 보유계약 리스트 입력
 elif st.session_state.menu == "보유계약 리스트 입력":
     st.title("📄 보유계약 리스트 입력")
     selected_cust = st.selectbox("고객 선택", ["선택"] + db_cust['이름'].unique().tolist() if not db_cust.empty else ["등록된 고객 없음"])
@@ -129,68 +126,110 @@ elif st.session_state.menu == "보유계약 리스트 입력":
                 sheet2.append_row([c_name, c_date, c_comp, c_prod, c_price, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
                 st.success("✅ '보장분석시트'에 기록되었습니다!")
 
-# (4) CSV DB 일괄 업로드 (신규 기능)
+# (4) CSV DB 일괄 업로드 (스마트 업데이트 추가)
 elif st.session_state.menu == "CSV DB 일괄 업로드":
-    st.title("📂 기존 고객 DB 일괄 업로드 (CSV)")
-    st.info("엑셀 파일을 'CSV(쉼표로 분리)' 형식으로 저장한 후 업로드해주세요.")
+    st.title("📂 기존 고객 DB 스마트 업로드 (CSV)")
+    st.info("중복 고객은 제외되며, 기존 정보 중 비어있는 칸만 새로운 데이터로 채워집니다.")
     
     upload_file = st.file_uploader("CSV 파일 선택", type=['csv'])
     
     if upload_file:
         try:
-            # CSV 읽기 (빈칸은 처리)
             df = pd.read_csv(upload_file).fillna("")
             st.write("📊 업로드된 데이터 미리보기 (상위 5개)")
             st.dataframe(df.head())
             
             st.markdown("---")
             st.subheader("🔗 데이터 항목 매칭")
-            st.write("구글 시트의 항목과 업로드한 CSV 파일의 제목을 알맞게 연결해 주세요. (해당 항목이 없으면 '선택 안 함' 유지)")
-            
-            # CSV 컬럼 옵션
             csv_cols = ["선택 안 함"] + list(df.columns)
             
-            # 구글 시트 헤더 매칭 UI
             cols = st.columns(3)
             mapping = {}
             target_headers = ["이름", "주민번호", "연락처", "주소", "직업", "계좌번호", "차량번호", "자동차보험회사", "가입일자"]
             
             for i, header in enumerate(target_headers):
                 with cols[i % 3]:
-                    # CSV 파일에 구글 시트와 똑같은 이름이 있으면 자동 선택
-                    default_idx = csv_cols.index(header) if header in csv_cols else 0
+                    default_idx = 0
+                    if header in csv_cols:
+                        default_idx = csv_cols.index(header)
+                    # 유의어 매칭 처리
+                    elif header == "연락처":
+                        for syn in ["전화번호", "핸드폰", "휴대폰", "연락처"]:
+                            if syn in csv_cols:
+                                default_idx = csv_cols.index(syn)
+                                break
+                    elif header == "주소":
+                        if "집주소" in csv_cols: default_idx = csv_cols.index("집주소")
+                    
                     mapping[header] = st.selectbox(f"➡️ {header}", csv_cols, index=default_idx)
             
-            if st.button("🚀 데이터 구글 시트로 일괄 전송"):
-                with st.spinner("데이터를 전송하는 중입니다..."):
-                    upload_data = []
+            if st.button("🚀 데이터 스마트 병합 전송"):
+                with st.spinner("중복 확인 및 데이터를 병합하는 중입니다..."):
+                    new_upload_data = []
+                    update_count = 0
                     today_str = datetime.now().strftime("%Y-%m-%d")
                     
                     for _, row in df.iterrows():
-                        # 이름이 없으면 스킵
-                        name_val = row[mapping["이름"]] if mapping["이름"] != "선택 안 함" else ""
+                        name_val = str(row[mapping["이름"]]).strip() if mapping["이름"] != "선택 안 함" else ""
                         if not name_val: continue
                         
-                        row_data = [
-                            today_str,  # 등록일자 (자동)
-                            name_val,
-                            str(row[mapping["주민번호"]]) if mapping["주민번호"] != "선택 안 함" else "",
-                            str(row[mapping["연락처"]]) if mapping["연락처"] != "선택 안 함" else "",
-                            str(row[mapping["주소"]]) if mapping["주소"] != "선택 안 함" else "",
-                            str(row[mapping["직업"]]) if mapping["직업"] != "선택 안 함" else "",
-                            str(row[mapping["계좌번호"]]) if mapping["계좌번호"] != "선택 안 함" else "",
-                            str(row[mapping["차량번호"]]) if mapping["차량번호"] != "선택 안 함" else "",
-                            str(row[mapping["자동차보험회사"]]) if mapping["자동차보험회사"] != "선택 안 함" else "",
-                            str(row[mapping["가입일자"]]) if mapping["가입일자"] != "선택 안 함" else ""
-                        ]
-                        upload_data.append(row_data)
+                        # CSV에서 가져온 데이터 정리
+                        in_data = {
+                            "주민번호": str(row[mapping["주민번호"]]).strip() if mapping["주민번호"] != "선택 안 함" else "",
+                            "연락처": str(row[mapping["연락처"]]).strip() if mapping["연락처"] != "선택 안 함" else "",
+                            "주소": str(row[mapping["주소"]]).strip() if mapping["주소"] != "선택 안 함" else "",
+                            "직업": str(row[mapping["직업"]]).strip() if mapping["직업"] != "선택 안 함" else "",
+                            "계좌번호": str(row[mapping["계좌번호"]]).strip() if mapping["계좌번호"] != "선택 안 함" else "",
+                            "차량번호": str(row[mapping["차량번호"]]).strip() if mapping["차량번호"] != "선택 안 함" else "",
+                            "자동차보험회사": str(row[mapping["자동차보험회사"]]).strip() if mapping["자동차보험회사"] != "선택 안 함" else "",
+                            "가입일자": str(row[mapping["가입일자"]]).strip() if mapping["가입일자"] != "선택 안 함" else ""
+                        }
+                        
+                        # 기존 DB에 이름이 있는지 확인
+                        existing = db_cust[db_cust['이름'] == name_val]
+                        
+                        if not existing.empty:
+                            # 기존 고객이 있을 경우 비어있는 칸만 업데이트
+                            idx = existing.index[0]
+                            sheet_row_idx = idx + 2
+                            existing_data = existing.iloc[0]
+                            
+                            col_index_map = {
+                                "주민번호": 3, "연락처": 4, "주소": 5, "직업": 6, 
+                                "계좌번호": 7, "차량번호": 8, "자동차보험회사": 9, "가입일자": 10
+                            }
+                            
+                            updates_made = False
+                            for key, col_num in col_index_map.items():
+                                curr_val = existing_data.get(key, "").strip()
+                                new_val = in_data[key]
+                                
+                                # 기존 데이터가 비어있거나 '-' 인데, 새로운 데이터가 존재할 경우
+                                if curr_val in ["", "-"] and new_val:
+                                    sheet1.update_cell(sheet_row_idx, col_num, new_val)
+                                    updates_made = True
+                                    
+                            if updates_made:
+                                update_count += 1
+                        else:
+                            # 완전히 새로운 고객인 경우
+                            new_upload_data.append([
+                                today_str, 
+                                name_val, 
+                                in_data["주민번호"], 
+                                in_data["연락처"], 
+                                in_data["주소"], 
+                                in_data["직업"], 
+                                in_data["계좌번호"], 
+                                in_data["차량번호"], 
+                                in_data["자동차보험회사"], 
+                                in_data["가입일자"]
+                            ])
                     
-                    if upload_data:
-                        # append_rows를 통해 API 호출 1번으로 대량 업로드 (속도 최적화)
-                        sheet1.append_rows(upload_data)
-                        st.success(f"✅ 총 {len(upload_data)}명의 고객 데이터가 성공적으로 일괄 등록되었습니다!")
-                        st.balloons()
-                    else:
-                        st.error("업로드할 데이터가 없습니다. '이름' 항목 매칭을 확인해 주세요.")
+                    if new_upload_data:
+                        sheet1.append_rows(new_upload_data)
+                        
+                    st.success(f"📊 작업 내역: 신규 고객 {len(new_upload_data)}명 등록, 기존 고객 {update_count}명 정보 보완.")
+                    st.balloons()
         except Exception as e:
-            st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+            st.error(f"오류가 발생했습니다: {e}")
