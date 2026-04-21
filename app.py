@@ -18,7 +18,7 @@ def get_gsheet():
         return None
 
 # --- [2. 데이터 로드 및 초기화] ---
-st.set_page_config(page_title="배현우 FC 고객관리 v44.0", layout="wide")
+st.set_page_config(page_title="배현우 FC 시스템 v45.0", layout="wide")
 sheet = get_gsheet()
 
 # 시트 헤더 순서 고정
@@ -33,16 +33,25 @@ if sheet:
 else:
     st.error("구글 시트 연결 실패"); st.stop()
 
-# --- [3. 좌측 사이드바 메뉴] ---
+# --- [3. 메뉴 세션 관리 (자동 전환 핵심)] ---
+if "menu" not in st.session_state:
+    st.session_state.menu = "고객조회 및 수정"
+
+# --- [4. 좌측 사이드바 메뉴] ---
 with st.sidebar:
     st.header("📋 관리 메뉴")
-    # 메뉴 선택
-    menu = st.radio("메뉴 이동", ["고객조회 및 수정", "고객 신규등록"])
+    menu_options = ["고객조회 및 수정", "고객 신규등록"]
+    # 세션 상태에 저장된 메뉴를 기본 인덱스로 설정
+    current_idx = menu_options.index(st.session_state.menu)
+    
+    # 라디오 버튼 선택 시 세션 상태 업데이트
+    choice = st.radio("메뉴 이동", menu_options, index=current_idx)
+    st.session_state.menu = choice
 
-# --- [4. 메뉴별 기능 구현] ---
+# --- [5. 메뉴별 기능 구현] ---
 
 # (1) 고객조회 및 수정
-if menu == "고객조회 및 수정":
+if st.session_state.menu == "고객조회 및 수정":
     st.title("🔍 고객 정보 상세 조회")
     search_name = st.text_input("조회할 고객명을 입력하세요")
 
@@ -51,7 +60,7 @@ if menu == "고객조회 및 수정":
 
         if not target_res.empty:
             cust = target_res.iloc[0]
-            row_idx = target_res.index[0] + 2 # 시트 행 번호
+            row_idx = target_res.index[0] + 2
             
             # 정보변경 모드 세션 관리
             if f"edit_{search_name}" not in st.session_state:
@@ -77,7 +86,7 @@ if menu == "고객조회 및 수정":
                     st.session_state[f"edit_{search_name}"] = True
                     st.rerun()
             else:
-                # --- 수정 화면 (정보변경 버튼 클릭 시) ---
+                # --- 수정 화면 ---
                 st.subheader(f"📝 {search_name} 고객 정보 수정")
                 with st.form("update_form"):
                     u1, u2 = st.columns(2)
@@ -97,22 +106,22 @@ if menu == "고객조회 및 수정":
                         updated_row = [datetime.now().strftime("%Y-%m-%d"), up_name, up_jumin, up_phone, up_addr, up_job, up_acc, up_car, up_car_comp, up_date]
                         for i, val in enumerate(updated_row):
                             sheet.update_cell(row_idx, i + 1, val)
-                        st.success("정보가 변경되었습니다."); st.session_state[f"edit_{search_name}"] = False; st.rerun()
+                        st.success("정보 변경 완료"); st.session_state[f"edit_{search_name}"] = False; st.rerun()
                 
                 if st.button("취소"):
                     st.session_state[f"edit_{search_name}"] = False; st.rerun()
         else:
-            # 등록되지 않은 고객일 경우
+            # --- 미등록 고객 시 자동 이동 버튼 ---
             st.error(f"'{search_name}' 고객님은 등록되지 않은 이름입니다.")
             if st.button(f"➕ {search_name} 신규 등록하러 가기"):
-                st.session_state.temp_name = search_name
-                # 메뉴 세션 상태를 변경하여 신규등록 화면으로 유도
-                st.info("신규등록 메뉴를 클릭하여 등록을 진행해주세요.")
+                st.session_state.temp_name = search_name # 신규 등록창으로 이름 전달
+                st.session_state.menu = "고객 신규등록"  # 메뉴 상태 강제 변경
+                st.rerun() # 즉시 화면 리프레시
 
 # (2) 고객 신규등록
-if menu == "고객 신규등록":
+if st.session_state.menu == "고객 신규등록":
     st.title("➕ 신규 고객 등록")
-    # 조회에서 넘어온 이름이 있다면 자동 입력
+    # 조회 메뉴에서 전달받은 이름이 있으면 기본값으로 사용
     pre_name = st.session_state.get("temp_name", "")
     
     with st.form("reg_form"):
@@ -135,6 +144,8 @@ if menu == "고객 신규등록":
                 new_row = [datetime.now().strftime("%Y-%m-%d"), r_name, r_jumin, r_phone, r_addr, r_job, r_acc, r_car, r_car_comp, r_date.strftime("%Y-%m-%d")]
                 sheet.append_row(new_row)
                 st.success(f"{r_name} 고객님 등록 완료!")
-                if "temp_name" in st.session_state: del st.session_state.temp_name
+                st.session_state.temp_name = "" # 등록 후 이름 초기화
+                st.session_state.menu = "고객조회 및 수정" # 등록 완료 후 다시 조회 메뉴로 전환
+                st.rerun()
             else:
                 st.warning("이름과 주민번호는 필수입니다.")
